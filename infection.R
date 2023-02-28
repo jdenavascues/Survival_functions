@@ -37,6 +37,7 @@ check_cumulative <- function(df, rep_size) {
 analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   
   # LOAD THE DATA
+  
   # check input is a character
   if (is.character(x)) {
     # check input is a path to an Excel file
@@ -61,7 +62,9 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
     cat("`analyse_spreadsheet` cannot use the input data.\n")
     cat("`x` must be a suitable dataframe or a path to a suitable Excel file.")
     break }
+  
   # RECONCILE ARGUMENTS AND METADATA
+  
   # `rep_size`
   if (missing(rep_size)) {
     if (exists('metadata')) {
@@ -82,7 +85,7 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
       if (!is.logical(cum)) {
         cat('Something went wrong when establishing whether the data is recorded cumulatively.\n')
         cat('The metadata of this contains a non-logical value for `cum`.\n')
-        cat('`analyse_spreadsheet` will attempt to deduce the value.')
+        cat('`analyse_spreadsheet` will attempt to deduce the value.\n')
         cum = check_cumulative(df, rep_size)
       }
     } else {
@@ -90,9 +93,15 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
       cat('`analyse_spreadsheet` will attempt to deduce the value.')
       cum = check_cumulative(df, rep_size)
     }
+    if (cum) {
+      cat('`analyse_spreadsheet` will assume that the data was recorded CUMULATIVELY.\n')
+    } else {
+      cat('`analyse_spreadsheet` will assume that the data was recorded NON-CUMULATIVELY.\n')
+    }
   }
 
   # STANDARDISE COLUMN NAMES
+  # pending: catch naming/missing data errors here <----------------------------
   
   # make lowercase
   names(df) <- str_to_lower(names(df))
@@ -120,11 +129,9 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   } else if (length( grep('censor', names(df)) )==0) {
     df$censored <- 0
   }
-  ###
-  ### catch naming/missing data errors here
-  ###
-  
+
   # ESTABLISH TIME INTERVALS
+  
   cat('establishing time intervals...\n')
   format_in <- "%d.%m.%Y"
   df$date <- as.Date(df$date, format=format_in)
@@ -133,9 +140,8 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   df$hour <- signif(difftime(df$time2, df$time2[1], units = "hours"), 3)
   
   # IN CASE DATA IS RECORDED CUMULATIVELY
-  ###
-  ### this needs to be implemented to read from the 'metadata' spreadsheet
-  ###
+  
+  cat('establishing individual events (non-cumulative)...\n')
   if (cum) {
     var_combos <- df %>% expand(treatment, dose, genotype, replicate)
     for (row in 1:nrow(var_combos)) {
@@ -149,11 +155,11 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
            df$dose==combo$dose &
            df$genotype==combo$genotype &
            df$replicate==combo$replicate,]$deaths <- newdeaths
-    } else if (){}
-    
+    }
   }
   
   # ESTABLISH NUMBER OF RECORDED EVENTS
+  
   cat('establishing death numbers...\n')
   cat('establishing explicit censorings...\n')
   # remove rows without data 
@@ -176,6 +182,7 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   fin_df$maxhour <- max(fin_df$hour)
   
   # INCLUDE NON-RECORDED CENSORSHIP
+  
   cat('establishing implicit censorings...\n')
   surv_df <- aggregate(deaths ~ replicate + genotype + treatment + dose, df, sum)
   surv_df$censored <- rep_size - surv_df$deaths
@@ -192,27 +199,31 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   }
   
   # SURVIVAL MODELLING
+  
   cat('\nCox PH MODELLING\n')
+  cat('\n----------------\n')
   if (cph) {
     cph_model <- coxph(Surv(hour, event) ~ treatment + genotype + treatment*genotype,
                        data=fin_df)
     zphfit <- cox.zph(cph_model)
     if (zphfit$table[,3]['GLOBAL']>0.05){
-      cat('\tSchoenfeld test shows PH assumption is respected')
+      cat('\tSchoenfeld test shows PH assumption is respected\n')
       cat('(null hypothesis=it is not)):\n')
       ggcoxzph(zphfit)
-      cat('P-value: ', cox.zph(cph_model)$table[,3])
+      cat('P-value: ', cox.zph(cph_model)$table[,3], '\n')
       cat(paste("\nlog-rank test p-value:", summary(cph_model)$logtest[3], "\n"))
       cat('\tThe variables with significant effect are:\n')
       print(cph_model)
     } else {
-      cat('\tSchoenfeld test shows PH assumption is NOT respected:\n')
+      cat('\tSchoenfeld test shows PH assumption is NOT respected:\n\n')
       print(cox.zph(cph_model)$table[,3]['GLOBAL'])
     }
   }
   # for plotting (long-rank)
   cat('\nLOG-RANK p-value\n')
-  time2event_model <- survdiff(Surv(hour, event) ~ treatment + genotype, data=fin_df)
-  cat('The log-rank test gives a p-value of ', time2event_model$pvalue)
+  cat('\n----------------\n')
+  model <- survdiff(Surv(hour, event) ~ treatment + genotype, data=fin_df)
+  cat('The log-rank test gives a p-value of ', model$pvalue)
+  
   return( fin_df )
 }
