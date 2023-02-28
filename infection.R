@@ -182,6 +182,7 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   fin_df$maxhour <- max(fin_df$hour)
   
   # INCLUDE NON-RECORDED CENSORSHIP
+  # pending: remove recorded censorship from automated total <-----------------------
   
   cat('establishing implicit censorings...\n')
   surv_df <- aggregate(deaths ~ replicate + genotype + treatment + dose, df, sum)
