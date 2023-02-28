@@ -1,3 +1,10 @@
+library(readxl)
+library(tidyverse)
+library(survival)
+library(survminer)
+library(dplyr)
+library(tidyr)
+
 f <- function(x, y) {
   # this is just to change the format of the date.
   fout <- "%Y-%m-%d"
@@ -9,15 +16,38 @@ f <- function(x, y) {
   paste(d, t)
 }
 
-analyse_spreadsheet <- function(x, sheet='data', rep_size, cum=FALSE, cph=FALSE) {
+check_cumulative <- function(df, rep_size) {
+  check <- df %>% group_by(genotype, treatment, replicate) %>%
+    summarise(diff=diff(deaths), .groups='keep') %>%
+    summarise(cumulative_xdiff=all(diff>=0), .groups='keep')
+  cumulative_compatible <- data.frame(diff = check$cumulative_xdiff)
+  check <- df %>% group_by(genotype, treatment, replicate) %>%
+    summarise(sum=sum(deaths), .groups='keep') %>%
+    summarise(cumulative_xsum=all(sum>rep_size), .groups='keep')
+  cumulative_compatible$sum <- check$cumulative_xsum
+  cumulative_compatible$cumulative <- (cumulative_compatible$diff | cumulative_compatible$sum)
+  if ( all(cumulative_compatible$cumulative) ) {
+    cum = TRUE
+  } else {
+    cum = FALSE
+  }
+  return( cum )
+}
+
+analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   
   # LOAD THE DATA
-  
   # check input is a character
   if (is.character(x)) {
     # check input is a path to an Excel file
     if (file.exists(x) & startsWith(format_from_signature(filepath),'xl')){
-      df <- read_excel(x, sheet=sheet)
+      # check `sheet` is specified
+      if (!missing(sheet)){
+        df <- read_excel(x, sheet=sheet)
+      } else {
+        try::
+        df <- read_excel(x, sheet=sheet)
+      }
       # check that the Excel file has a 'metadata' sheet
       if (!is.na(match("metadata", str_to_lower( (excel_sheets(filepath)) )))) {
         m <- match("metadata", str_to_lower(excel_sheets(filepath)))
@@ -31,21 +61,37 @@ analyse_spreadsheet <- function(x, sheet='data', rep_size, cum=FALSE, cph=FALSE)
     cat("`analyse_spreadsheet` cannot use the input data.\n")
     cat("`x` must be a suitable dataframe or a path to a suitable Excel file.")
     break }
-
-  # check if the metadata contains information about the replicate sizes:
+  # RECONCILE ARGUMENTS AND METADATA
+  # `rep_size`
   if (missing(rep_size)) {
     if (exists('metadata')) {
       rep_size <- metadata['Category'=='Replicate_size','Value']
       if (!is.numeric(rep_size)) {
-        cat('Something went wrong when establishing replicate sizes\n')
-        cat('A default value of rep_size=20 will be used')
+        cat('Something went wrong when establishing replicate sizes.\n')
+        cat('A default value of rep_size=20 will be used.')
         rep_size = 20
       }
     } else {
       cat("No replicate size was given so the default value of 20 will be used instead.")
       rep_size = 20 }
   }
-  
+  # `cum`
+  if (missing(cum)) {
+    if (exists('metadata')) {
+      cum <- metadata['Category'=='Cumulative','Value']
+      if (!is.logical(cum)) {
+        cat('Something went wrong when establishing whether the data is recorded cumulatively.\n')
+        cat('The metadata of this contains a non-logical value for `cum`.\n')
+        cat('`analyse_spreadsheet` will attempt to deduce the value.')
+        cum = check_cumulative(df, rep_size)
+      }
+    } else {
+      cat('There is no input information about whether the data is recorded cumulatively.\n')
+      cat('`analyse_spreadsheet` will attempt to deduce the value.')
+      cum = check_cumulative(df, rep_size)
+    }
+  }
+
   # STANDARDISE COLUMN NAMES
   
   # make lowercase
@@ -103,7 +149,8 @@ analyse_spreadsheet <- function(x, sheet='data', rep_size, cum=FALSE, cph=FALSE)
            df$dose==combo$dose &
            df$genotype==combo$genotype &
            df$replicate==combo$replicate,]$deaths <- newdeaths
-    }
+    } else if (){}
+    
   }
   
   # ESTABLISH NUMBER OF RECORDED EVENTS
