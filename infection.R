@@ -45,16 +45,22 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
       if (!missing(sheet)){
         df <- read_excel(x, sheet=sheet)
       } else {
-        try::
-        df <- read_excel(x, sheet=sheet)
+        t <- try( df <- read_excel(x, sheet='data') )
+        if (inherits(t, "try-error")) {
+          tt <- try( df <- read_excel(x, sheet='tidy') )
+          if (inherits(tt, "try-error")) {
+            df <- read_excel(x)
+            message('You have not provided a spreadsheet name, nor your Excel file has\nany of the usual names for time-to-event data in the lab.\nWe will continue using whatever is in the first sheet.')
+          }
+        }
       }
-      # check that the Excel file has a 'metadata' sheet
+      # check that the Excel file has a 'metadata' sheet (ignoring capitalisation)
       if (!is.na(match("metadata", str_to_lower( (excel_sheets(filepath)) )))) {
         m <- match("metadata", str_to_lower(excel_sheets(filepath)))
         metadata <- read_excel(x, sheet=excel_sheets(filepath)[m])
       }
     }
-  # if it is not a path, then check if it is a dataframe
+    # if it is not a path, then check if it is a dataframe
   } else if (is.data.frame(x)) {
     df <- x
   } else {
@@ -67,7 +73,7 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   # `rep_size`
   if (missing(rep_size)) {
     if (exists('metadata')) {
-      rep_size <- metadata['Category'=='Replicate_size','Value']
+      rep_size <- metadata[metadata$Category=='Replicate_size','Value'][[1]]
       if (!is.numeric(rep_size)) {
         cat('Something went wrong when establishing replicate sizes.\n')
         cat('A default value of rep_size=20 will be used.')
@@ -79,23 +85,16 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   }
   # `cum`
   if (missing(cum)) {
+    
     if (exists('metadata')) {
-      cum <- metadata['Category'=='Cumulative','Value']
-      if (!is.logical(cum)) {
-        cat('Something went wrong when establishing whether the data is recorded cumulatively.\n')
-        cat('The metadata of this contains a non-logical value for `cum`.\n')
-        cat('`analyse_spreadsheet` will attempt to deduce the value.\n')
-        cum = check_cumulative(df, rep_size)
-      }
+      cum <- metadata[metadata$Category=='Cumulative','Value'][[1]]
+      t <- try(if (eval(parse(text=cum))) { cum <- TRUE }
+               else if (!eval(parse(text=cum))) { cum <- FALSE })
+      if(inherits(t, 'try-error')) { cum = check_cumulative(df, rep_size) }
     } else {
       cat('There is no input information about whether the data is recorded cumulatively.\n')
       cat('`analyse_spreadsheet` will attempt to deduce the value.')
       cum = check_cumulative(df, rep_size)
-    }
-    if (cum) {
-      cat('`analyse_spreadsheet` will assume that the data was recorded CUMULATIVELY.\n')
-    } else {
-      cat('`analyse_spreadsheet` will assume that the data was recorded NON-CUMULATIVELY.\n')
     }
   }
 

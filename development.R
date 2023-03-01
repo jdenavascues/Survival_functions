@@ -3,6 +3,7 @@ library(survival)
 library(survminer)
 library(dplyr)
 library(tidyr)
+library(stringr)
 
 f <- function(x, y) {
   # this is just to change the format of the date.
@@ -17,23 +18,25 @@ f <- function(x, y) {
 
 check_cumulative <- function(df, rep_size) {
   check <- df %>% group_by(genotype, treatment, replicate) %>%
-    summarise(diff=diff(deaths), .groups='keep') %>%
+    summarise(diff=diff(event), .groups='keep') %>%
     summarise(cumulative_xdiff=all(diff>=0), .groups='keep')
   cumulative_compatible <- data.frame(diff = check$cumulative_xdiff)
   check <- df %>% group_by(genotype, treatment, replicate) %>%
-    summarise(sum=sum(deaths), .groups='keep') %>%
+    summarise(sum=sum(event), .groups='keep') %>%
     summarise(cumulative_xsum=all(sum>rep_size), .groups='keep')
   cumulative_compatible$sum <- check$cumulative_xsum
   cumulative_compatible$cumulative <- (cumulative_compatible$diff | cumulative_compatible$sum)
   if ( all(cumulative_compatible$cumulative) ) {
     cum = TRUE
+    message('`analyse_spreadsheet` will assume that the data was recorded CUMULATIVELY.')
   } else {
     cum = FALSE
+    message('`analyse_spreadsheet` will assume that the data was recorded NON-CUMULATIVELY.')
   }
   return( cum )
 }
 
-load_devtime_data <- function(x, sheet, rep_size, cum) {
+load_devtime_data <- function(x, sheet, rep_size, cum, censor=FALSE) {
   
   # LOAD THE DATA
   
@@ -45,10 +48,16 @@ load_devtime_data <- function(x, sheet, rep_size, cum) {
       if (!missing(sheet)){
         df <- read_excel(x, sheet=sheet)
       } else {
-        try::
-          df <- read_excel(x, sheet=sheet)
-      }
-      # check that the Excel file has a 'metadata' sheet
+        t <- try( df <- read_excel(x, sheet='data') )
+        if (inherits(t, "try-error")) {
+          tt <- try( df <- read_excel(x, sheet='tidy') )
+          if (inherits(tt, "try-error")) {
+            df <- read_excel(x)
+            message('You have not provided a spreadsheet name, nor your Excel file has\nany of the usual names for time-to-event data in the lab.\nWe will continue using whatever is in the first sheet.')
+            }
+          }
+        }
+      # check that the Excel file has a 'metadata' sheet (ignoring capitalisation)
       if (!is.na(match("metadata", str_to_lower( (excel_sheets(filepath)) )))) {
         m <- match("metadata", str_to_lower(excel_sheets(filepath)))
         metadata <- read_excel(x, sheet=excel_sheets(filepath)[m])
@@ -67,7 +76,8 @@ load_devtime_data <- function(x, sheet, rep_size, cum) {
   # `rep_size`
   if (missing(rep_size)) {
     if (exists('metadata')) {
-      rep_size <- metadata['Category'=='Replicate_size','Value']
+      rep_size <- metadata[metadata$Category=='Replicate_size','Value'][[1]]
+      rep_size <- as.numeric(rep_size)
       if (!is.numeric(rep_size)) {
         cat('Something went wrong when establishing replicate sizes.\n')
         cat('A default value of rep_size=20 will be used.')
@@ -79,23 +89,16 @@ load_devtime_data <- function(x, sheet, rep_size, cum) {
   }
   # `cum`
   if (missing(cum)) {
+    
     if (exists('metadata')) {
-      cum <- metadata['Category'=='Cumulative','Value']
-      if (!is.logical(cum)) {
-        cat('Something went wrong when establishing whether the data is recorded cumulatively.\n')
-        cat('The metadata of this contains a non-logical value for `cum`.\n')
-        cat('`analyse_spreadsheet` will attempt to deduce the value.\n')
-        cum = check_cumulative(df, rep_size)
-      }
+      cum <- metadata[metadata$Category=='Cumulative','Value'][[1]]
+      t <- try(if (eval(parse(text=cum))) { cum <- TRUE }
+               else if (!eval(parse(text=cum))) { cum <- FALSE })
+      if(inherits(t, 'try-error')) { cum = check_cumulative(df, rep_size) }
     } else {
       cat('There is no input information about whether the data is recorded cumulatively.\n')
       cat('`analyse_spreadsheet` will attempt to deduce the value.')
       cum = check_cumulative(df, rep_size)
-    }
-    if (cum) {
-      cat('`analyse_spreadsheet` will assume that the data was recorded CUMULATIVELY.\n')
-    } else {
-      cat('`analyse_spreadsheet` will assume that the data was recorded NON-CUMULATIVELY.\n')
     }
   }
   
@@ -145,47 +148,47 @@ load_devtime_data <- function(x, sheet, rep_size, cum) {
     var_combos <- df %>% expand(treatment, dose, genotype, replicate)
     for (row in 1:nrow(var_combos)) {
       combo <- var_combos[row, ]
-      deaths_cum <- df %>% subset(treatment==combo$treatment &
+      events_cum <- df %>% subset(treatment==combo$treatment &
                                     dose==combo$dose &
                                     genotype==combo$genotype &
-                                    replicate==combo$replicate, select=deaths)
-      newdeaths <- c(0, diff(deaths_cum$deaths))
+                                    replicate==combo$replicate, select=event)
+      newevents <- c(0, diff(events_cum$event))
       df[df$treatment==combo$treatment &
            df$dose==combo$dose &
            df$genotype==combo$genotype &
-           df$replicate==combo$replicate,]$deaths <- newdeaths
+           df$replicate==combo$replicate,]$event <- newevents
     }
   }
   
   # ESTABLISH NUMBER OF RECORDED EVENTS
   
-  cat('establishing death numbers...\n')
+  cat('establishing event numbers...\n')
   cat('establishing explicit censorings...\n')
   # remove rows without data 
-  deaths_df<- df[ df$deaths>0, c('hour', 'deaths', 'treatment',
+  events_df<- df[ df$event>0, c('hour', 'event', 'treatment',
                                  'genotype', 'dose', 'replicate')]
   censor_df<- df[ df$censored>0, c('hour', 'censored', 'treatment',
                                    'genotype', 'dose', 'replicate')]
   # replicate rows per their number of events
-  deaths_df <- deaths_df[rep(1:nrow(deaths_df), deaths_df$deaths), ]
+  events_df <- events_df[rep(1:nrow(events_df), events_df$event), ]
   if (nrow(censor_df)>0) {
     censor_df <- censor_df[rep(1:nrow(censor_df), censor_df$censored), ]
   }
   # turn deaths and censored into events (0/1)
-  names(deaths_df)[names(deaths_df)=='deaths'] <- 'event'
+  names(events_df)[names(events_df)=='event'] <- 'event'
   names(censor_df)[names(censor_df)=='censored'] <- 'event'
-  deaths_df$event <- 1 # code for event=death
+  events_df$event <- 1 # code for event=developmental transition
   censor_df$event <- 0 # code for event=censoring
   # combine
-  fin_df <- rbind(deaths_df, censor_df)
+  fin_df <- rbind(events_df, censor_df)
   fin_df$maxhour <- max(fin_df$hour)
   
   # INCLUDE NON-RECORDED CENSORSHIP
   # pending: remove recorded censorship from automated total <-----------------------
   
   cat('establishing implicit censorings...\n')
-  surv_df <- aggregate(deaths ~ replicate + genotype + treatment + dose, df, sum)
-  surv_df$censored <- rep_size - surv_df$deaths
+  surv_df <- aggregate(event ~ replicate + genotype + treatment + dose, df, sum)
+  surv_df$censored <- rep_size - surv_df$event
   for (r in 1:nrow(surv_df)) {
     for (c in 1:surv_df$censored[r]) {
       fin_df[nrow(fin_df) + 1,] = list(max(fin_df$hour),
@@ -197,7 +200,8 @@ load_devtime_data <- function(x, sheet, rep_size, cum) {
                                        max(fin_df$maxhour))
     }
   }
-  return( fin_df )
+  if (censor) { return( fin_df ) }
+  else { return( subset(fin_df, event==1) ) }
 }
 
 basic_analysis <- function(df, cph=FALSE) {
