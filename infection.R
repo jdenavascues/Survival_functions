@@ -226,27 +226,27 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   
   return( fin_df )
 }
-
-col_lin_test <- function(palette, ) {
-  
-  # Determine explanatory variables and their reference levels
-  df[explanatory_vars] <- lapply(df[explanatory_vars], factor)
-  df[explanatory_vars] <- Map(relevel, df[explanatory_vars], reference_lvls)
-  
-  # Determine labels
-  
-  # Determine colour/linetype combinations
-  
-}
-
-prepare_for_plotting <- function(df, explanatory_vars, reference_lvls, for_print, sep='|') {
-
-  # Determine explanatory variables and their reference levels
-  df[explanatory_vars] <- lapply(df[explanatory_vars], factor)
-  df[explanatory_vars] <- Map(relevel, df[explanatory_vars], reference_lvls)
-  
-  # Determine labels
-  
-  # Determine colour/linetype combinations
-  
-}
+# 
+# col_lin_test <- function(palette, ) {
+#   
+#   # Determine explanatory variables and their reference levels
+#   df[explanatory_vars] <- lapply(df[explanatory_vars], factor)
+#   df[explanatory_vars] <- Map(relevel, df[explanatory_vars], reference_lvls)
+#   
+#   # Determine labels
+#   
+#   # Determine colour/linetype combinations
+#   
+# }
+# 
+# prepare_for_plotting <- function(df, explanatory_vars, reference_lvls, for_print, sep='|') {
+# 
+#   # Determine explanatory variables and their reference levels
+#   df[explanatory_vars] <- lapply(df[explanatory_vars], factor)
+#   df[explanatory_vars] <- Map(relevel, df[explanatory_vars], reference_lvls)
+#   
+#   # Determine labels
+#   
+#   # Determine colour/linetype combinations
+#   
+# }
