@@ -232,26 +232,26 @@ basic_analysis <- function(df, cph=FALSE) {
   cat('The log-rank test gives a p-value of ', model$pvalue)
 }
 
-col_lin_test <- function(palette, ) {
-  
-  # Determine explanatory variables and their reference levels
-  df[explanatory_vars] <- lapply(df[explanatory_vars], factor)
-  df[explanatory_vars] <- Map(relevel, df[explanatory_vars], reference_lvls)
-  
-  # Determine labels
-  
-  # Determine colour/linetype combinations
-  
-}
+# col_lin_test <- function(palette, ) {
+#   
+#   # Determine explanatory variables and their reference levels
+#   df[explanatory_vars] <- lapply(df[explanatory_vars], factor)
+#   df[explanatory_vars] <- Map(relevel, df[explanatory_vars], reference_lvls)
+#   
+#   # Determine labels
+#   
+#   # Determine colour/linetype combinations
+#   
+# }
 
-prepare_for_plotting <- function(df, explanatory_vars, reference_lvls, for_print, sep='|') {
-  
-  # Determine explanatory variables and their reference levels
-  df[explanatory_vars] <- lapply(df[explanatory_vars], factor)
-  df[explanatory_vars] <- Map(relevel, df[explanatory_vars], reference_lvls)
-  
-  # Determine labels
-  
-  # Determine colour/linetype combinations
-  
-}
+# prepare_for_plotting <- function(df, explanatory_vars, reference_lvls, for_print, sep='|') {
+#   
+#   # Determine explanatory variables and their reference levels
+#   df[explanatory_vars] <- lapply(df[explanatory_vars], factor)
+#   df[explanatory_vars] <- Map(relevel, df[explanatory_vars], reference_lvls)
+#   
+#   # Determine labels
+#   
+#   # Determine colour/linetype combinations
+#   
+# }
