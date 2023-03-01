@@ -1,3 +1,9 @@
+library(readxl)
+library(survival)
+library(survminer)
+library(dplyr)
+library(tidyr)
+
 f <- function(x, y) {
   # this is just to change the format of the date.
   fout <- "%Y-%m-%d"
@@ -9,7 +15,25 @@ f <- function(x, y) {
   paste(d, t)
 }
 
-analyse_spreadsheet <- function(x, sheet='data', rep_size, cum=FALSE, cph=FALSE) {
+check_cumulative <- function(df, rep_size) {
+  check <- df %>% group_by(genotype, treatment, replicate) %>%
+    summarise(diff=diff(deaths), .groups='keep') %>%
+    summarise(cumulative_xdiff=all(diff>=0), .groups='keep')
+  cumulative_compatible <- data.frame(diff = check$cumulative_xdiff)
+  check <- df %>% group_by(genotype, treatment, replicate) %>%
+    summarise(sum=sum(deaths), .groups='keep') %>%
+    summarise(cumulative_xsum=all(sum>rep_size), .groups='keep')
+  cumulative_compatible$sum <- check$cumulative_xsum
+  cumulative_compatible$cumulative <- (cumulative_compatible$diff | cumulative_compatible$sum)
+  if ( all(cumulative_compatible$cumulative) ) {
+    cum = TRUE
+  } else {
+    cum = FALSE
+  }
+  return( cum )
+}
+
+load_devtime_data <- function(x, sheet, rep_size, cum) {
   
   # LOAD THE DATA
   
@@ -17,36 +41,66 @@ analyse_spreadsheet <- function(x, sheet='data', rep_size, cum=FALSE, cph=FALSE)
   if (is.character(x)) {
     # check input is a path to an Excel file
     if (file.exists(x) & startsWith(format_from_signature(filepath),'xl')){
-      df <- read_excel(x, sheet=sheet)
+      # check `sheet` is specified
+      if (!missing(sheet)){
+        df <- read_excel(x, sheet=sheet)
+      } else {
+        try::
+          df <- read_excel(x, sheet=sheet)
+      }
       # check that the Excel file has a 'metadata' sheet
       if (!is.na(match("metadata", str_to_lower( (excel_sheets(filepath)) )))) {
         m <- match("metadata", str_to_lower(excel_sheets(filepath)))
         metadata <- read_excel(x, sheet=excel_sheets(filepath)[m])
       }
     }
-  # if it is not a path, then check if it is a dataframe
+    # if it is not a path, then check if it is a dataframe
   } else if (is.data.frame(x)) {
     df <- x
   } else {
     cat("`analyse_spreadsheet` cannot use the input data.\n")
     cat("`x` must be a suitable dataframe or a path to a suitable Excel file.")
     break }
-
-  # check if the metadata contains information about the replicate sizes:
+  
+  # RECONCILE ARGUMENTS AND METADATA
+  
+  # `rep_size`
   if (missing(rep_size)) {
     if (exists('metadata')) {
       rep_size <- metadata['Category'=='Replicate_size','Value']
       if (!is.numeric(rep_size)) {
-        cat('Something went wrong when establishing replicate sizes\n')
-        cat('A default value of rep_size=20 will be used')
+        cat('Something went wrong when establishing replicate sizes.\n')
+        cat('A default value of rep_size=20 will be used.')
         rep_size = 20
       }
     } else {
       cat("No replicate size was given so the default value of 20 will be used instead.")
       rep_size = 20 }
   }
+  # `cum`
+  if (missing(cum)) {
+    if (exists('metadata')) {
+      cum <- metadata['Category'=='Cumulative','Value']
+      if (!is.logical(cum)) {
+        cat('Something went wrong when establishing whether the data is recorded cumulatively.\n')
+        cat('The metadata of this contains a non-logical value for `cum`.\n')
+        cat('`analyse_spreadsheet` will attempt to deduce the value.\n')
+        cum = check_cumulative(df, rep_size)
+      }
+    } else {
+      cat('There is no input information about whether the data is recorded cumulatively.\n')
+      cat('`analyse_spreadsheet` will attempt to deduce the value.')
+      cum = check_cumulative(df, rep_size)
+    }
+    if (cum) {
+      cat('`analyse_spreadsheet` will assume that the data was recorded CUMULATIVELY.\n')
+    } else {
+      cat('`analyse_spreadsheet` will assume that the data was recorded NON-CUMULATIVELY.\n')
+    }
+  }
   
   # STANDARDISE COLUMN NAMES
+  # pending: catch naming/missing data errors here <----------------------------
   
   # make lowercase
   names(df) <- str_to_lower(names(df))
@@ -74,11 +128,9 @@ analyse_spreadsheet <- function(x, sheet='data', rep_size, cum=FALSE, cph=FALSE)
   } else if (length( grep('censor', names(df)) )==0) {
     df$censored <- 0
   }
-  ###
-  ### catch naming/missing data errors here
-  ###
   
   # ESTABLISH TIME INTERVALS
+  
   cat('establishing time intervals...\n')
   format_in <- "%d.%m.%Y"
   df$date <- as.Date(df$date, format=format_in)
@@ -87,9 +139,8 @@ analyse_spreadsheet <- function(x, sheet='data', rep_size, cum=FALSE, cph=FALSE)
   df$hour <- signif(difftime(df$time2, df$time2[1], units = "hours"), 3)
   
   # IN CASE DATA IS RECORDED CUMULATIVELY
-  ###
-  ### this needs to be implemented to read from the 'metadata' spreadsheet
-  ###
+  
+  cat('establishing individual events (non-cumulative)...\n')
   if (cum) {
     var_combos <- df %>% expand(treatment, dose, genotype, replicate)
     for (row in 1:nrow(var_combos)) {
@@ -107,6 +158,7 @@ analyse_spreadsheet <- function(x, sheet='data', rep_size, cum=FALSE, cph=FALSE)
   }
   
   # ESTABLISH NUMBER OF RECORDED EVENTS
+  
   cat('establishing death numbers...\n')
   cat('establishing explicit censorings...\n')
   # remove rows without data 
@@ -129,6 +181,8 @@ analyse_spreadsheet <- function(x, sheet='data', rep_size, cum=FALSE, cph=FALSE)
   fin_df$maxhour <- max(fin_df$hour)
   
   # INCLUDE NON-RECORDED CENSORSHIP
+  # pending: remove recorded censorship from automated total <-----------------------
+  
   cat('establishing implicit censorings...\n')
   surv_df <- aggregate(deaths ~ replicate + genotype + treatment + dose, df, sum)
   surv_df$censored <- rep_size - surv_df$deaths
@@ -143,29 +197,57 @@ analyse_spreadsheet <- function(x, sheet='data', rep_size, cum=FALSE, cph=FALSE)
                                        max(fin_df$maxhour))
     }
   }
+  return( fin_df )
+}
+
+basic_analysis <- function(df, cph=FALSE) {
   
-  # SURVIVAL MODELLING
   cat('\nCox PH MODELLING\n')
+  cat('\n----------------\n')
   if (cph) {
     cph_model <- coxph(Surv(hour, event) ~ treatment + genotype + treatment*genotype,
                        data=fin_df)
     zphfit <- cox.zph(cph_model)
     if (zphfit$table[,3]['GLOBAL']>0.05){
-      cat('\tSchoenfeld test shows PH assumption is respected')
+      cat('\tSchoenfeld test shows PH assumption is respected\n')
       cat('(null hypothesis=it is not)):\n')
       ggcoxzph(zphfit)
-      cat('P-value: ', cox.zph(cph_model)$table[,3])
+      cat('P-value: ', cox.zph(cph_model)$table[,3], '\n')
       cat(paste("\nlog-rank test p-value:", summary(cph_model)$logtest[3], "\n"))
       cat('\tThe variables with significant effect are:\n')
       print(cph_model)
     } else {
-      cat('\tSchoenfeld test shows PH assumption is NOT respected:\n')
+      cat('\tSchoenfeld test shows PH assumption is NOT respected:\n\n')
       print(cox.zph(cph_model)$table[,3]['GLOBAL'])
     }
   }
-  # for plotting (long-rank)
+
   cat('\nLOG-RANK p-value\n')
-  time2event_model <- survdiff(Surv(hour, event) ~ treatment + genotype, data=fin_df)
-  cat('The log-rank test gives a p-value of ', time2event_model$pvalue)
-  return( fin_df )
+  cat('\n----------------\n')
+  model <- survdiff(Surv(hour, event) ~ treatment + genotype, data=fin_df)
+  cat('The log-rank test gives a p-value of ', model$pvalue)
+}
+
+col_lin_test <- function(palette, ) {
+  
+  # Determine explanatory variables and their reference levels
+  df[explanatory_vars] <- lapply(df[explanatory_vars], factor)
+  df[explanatory_vars] <- Map(relevel, df[explanatory_vars], reference_lvls)
+  
+  # Determine labels
+  
+  # Determine colour/linetype combinations
+  
+}
+
+prepare_for_plotting <- function(df, explanatory_vars, reference_lvls, for_print, sep='|') {
+  
+  # Determine explanatory variables and their reference levels
+  df[explanatory_vars] <- lapply(df[explanatory_vars], factor)
+  df[explanatory_vars] <- Map(relevel, df[explanatory_vars], reference_lvls)
+  
+  # Determine labels
+  
+  # Determine colour/linetype combinations
+  
 }
