@@ -225,6 +225,12 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
     fin_df <- rbind(fin_df, newrow)
   }
   
+  # COLUMN CLEANUP <--------- quite ad hoc!
+  
+  returned_vals <- c(included_vars, 'event', 'hour', 'time2')
+  fin_df <- fin_df[,returned_vals]
+  fin_df <- fin_df %>% rename(time = time2)
+  
   # SURVIVAL MODELLING
   
   cat('\nCox PH MODELLING\n')
