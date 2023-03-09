@@ -3,6 +3,7 @@ library(survival)
 library(survminer)
 library(dplyr)
 library(tidyr)
+library(stringr)
 
 f <- function(x, y) {
   # this is just to change the format of the date.
@@ -76,7 +77,7 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
       rep_size <- metadata[metadata$Category=='Replicate_size','Value'][[1]]
       if (!is.numeric(rep_size)) {
         cat('Something went wrong when establishing replicate sizes.\n')
-        cat('A default value of rep_size=20 will be used.')
+        cat('A default value of rep_size=20 will be used.\n')
         rep_size = 20
       }
     } else {
@@ -103,8 +104,27 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   
   # make lowercase
   names(df) <- str_to_lower(names(df))
+  # check that the essential variables are there:
+  usual_vars <- c('genotype', 'treatment', 'sex', 'replicate', 'dose')
+  all_vars <- c("date", "time", "deaths", "censored", "treatment",
+                "dose", "dose_unit", "genotype", "replicate", "sex")
+  extra_vars <- setdiff(names(df), all_vars)
+  confirmed_vars <- intersect(names(df), usual_vars)
+  if (length(confirmed_vars)==0){
+    cat('You do not seem to have any of the usual variables (genotype, treatment, sex).\n')
+    cat('Verify your dataset and if necessary, rename the columns.\n')
+    break
+  } else {
+    cat(paste('You have', length(confirmed_vars), 'of the usual variables:',
+              paste(confirmed_vars, collapse=', ')), '\n')
+  }
+  if (length(extra_vars)>0){
+    cat(paste('You have the additional variable(s):',
+              paste(extra_vars, collapse=', ')), '\n')
+    cat('This/these will be passed on to the output dataframe, but otherwise ignored.\n')
+  }
+  # take care of the columns specifying dose
   names(df)[names(df)=='dose_units'] <- 'dose_unit'
-  # make sure the 'dose' column is named correctly
   if (length( grep('dose', names(df)) )>0) {
     for (j in grep('dose', names(df)) ) {
       # create a 'date_units' if this is included in the 'dose' column name
@@ -128,6 +148,17 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
     df$censored <- 0
   }
 
+  # CLEAN UP NAs
+  
+  df <- df %>%
+    mutate(
+      across(where(is.numeric), coalesce, 0),
+      across(where(is.character), coalesce, "NA")
+      )
+  if ('sex' %in% names(df)) {
+    df$sex[df$sex=='NA'] <- 'mixed'
+  }
+  
   # ESTABLISH TIME INTERVALS
   
   cat('establishing time intervals...\n')
@@ -141,18 +172,17 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   
   cat('establishing individual events (non-cumulative)...\n')
   if (cum) {
-    var_combos <- df %>% expand(treatment, dose, genotype, replicate)
+    #var_combos <- df %>% expand(treatment, dose, genotype, replicate, sex)
+    #var_combos <- unique(expand_grid(df))
+    excluded_vars <- c('date','time','hour','time2','deaths','censored') # this may have to change depending on the project
+    included_vars <- names(df)[!names(df) %in% excluded_vars]
+    var_combos <- unique(expand_grid(df[included_vars]))
     for (row in 1:nrow(var_combos)) {
       combo <- var_combos[row, ]
-      deaths_cum <- df %>% subset(treatment==combo$treatment &
-                                    dose==combo$dose &
-                                    genotype==combo$genotype &
-                                    replicate==combo$replicate, select=deaths)
+      combo_rows <- apply(df[included_vars],1,function(x) {all(x==combo)})
+      deaths_cum <- df[combo_rows,'deaths']
       newdeaths <- c(0, diff(deaths_cum$deaths))
-      df[df$treatment==combo$treatment &
-           df$dose==combo$dose &
-           df$genotype==combo$genotype &
-           df$replicate==combo$replicate,]$deaths <- newdeaths
+      df[combo_rows,]$deaths <- newdeaths
     }
   }
   
@@ -160,16 +190,12 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   
   cat('establishing death numbers...\n')
   cat('establishing explicit censorings...\n')
-  # remove rows without data 
-  deaths_df<- df[ df$deaths>0, c('hour', 'deaths', 'treatment',
-                                 'genotype', 'dose', 'replicate')]
-  censor_df<- df[ df$censored>0, c('hour', 'censored', 'treatment',
-                                   'genotype', 'dose', 'replicate')]
+  # remove rows without data (deaths/censored separately)
+  deaths_df<- df[ df$deaths>0, !names(df) %in% c('censored')]
+  censor_df<- df[ df$censored>0, !names(df) %in% c('deaths')]
   # replicate rows per their number of events
   deaths_df <- deaths_df[rep(1:nrow(deaths_df), deaths_df$deaths), ]
-  if (nrow(censor_df)>0) {
-    censor_df <- censor_df[rep(1:nrow(censor_df), censor_df$censored), ]
-  }
+  censor_df <- censor_df[rep(1:nrow(censor_df), censor_df$censored), ]
   # turn deaths and censored into events (0/1)
   names(deaths_df)[names(deaths_df)=='deaths'] <- 'event'
   names(censor_df)[names(censor_df)=='censored'] <- 'event'
@@ -183,18 +209,20 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   # pending: remove recorded censorship from automated total <-----------------------
   
   cat('establishing implicit censorings...\n')
-  surv_df <- aggregate(deaths ~ replicate + genotype + treatment + dose, df, sum)
+  # the period indicates ALL the variables (the included ones, that is)
+  surv_df <- aggregate(deaths ~ ., df[,c(included_vars, 'deaths')], sum)
   surv_df$censored <- rep_size - surv_df$deaths
   for (r in 1:nrow(surv_df)) {
-    for (c in 1:surv_df$censored[r]) {
-      fin_df[nrow(fin_df) + 1,] = list(max(fin_df$hour),
-                                       0, # event=censoring
-                                       surv_df$treatment[r],
-                                       surv_df$genotype[r],
-                                       surv_df$dose[r],
-                                       surv_df$replicate[r],
-                                       max(fin_df$maxhour))
-    }
+    # complete list of columns <--- this would need to be more generalised
+    newrow <- surv_df[r,!names(surv_df) %in% c('deaths','censored')]
+    newrow$date <- max(fin_df$date)
+    newrow$time <- max(fin_df$time)
+    newrow$event <- 0
+    newrow$time2 <- max(fin_df$time2)
+    newrow$hour <- max(fin_df$hour)
+    newrow$maxhour <- max(fin_df$maxhour)
+    newrow <- newrow[rep(1,surv_df$censored[r]),]
+    fin_df <- rbind(fin_df, newrow)
   }
   
   # SURVIVAL MODELLING
