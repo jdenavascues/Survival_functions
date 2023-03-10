@@ -174,8 +174,6 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   excluded_vars <- c('date','time','hour','time2','deaths','censored') # this may have to change depending on the project
   included_vars <- names(df)[!names(df) %in% excluded_vars]
   if (cum) {
-    #var_combos <- df %>% expand(treatment, dose, genotype, replicate, sex)
-    #var_combos <- unique(expand_grid(df))
     var_combos <- unique(expand_grid(df[included_vars]))
     for (row in 1:nrow(var_combos)) {
       combo <- var_combos[row, ]
