@@ -191,12 +191,14 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   # remove rows without data (deaths/censored separately)
   deaths_df<- df[ df$deaths>0, !names(df) %in% c('censored')]
   censor_df<- df[ df$censored>0, !names(df) %in% c('deaths')]
-  # replicate rows per their number of events
+  # replicate rows per their number of deaths, then turn into event=1
   deaths_df <- deaths_df[rep(1:nrow(deaths_df), deaths_df$deaths), ]
-  censor_df <- censor_df[rep(1:nrow(censor_df), censor_df$censored), ]
-  # turn deaths and censored into events (0/1)
   names(deaths_df)[names(deaths_df)=='deaths'] <- 'event'
-  names(censor_df)[names(censor_df)=='censored'] <- 'event'
+  # same with censorings (if there are any!)
+  if (length(censor_df$censored)>0) {
+    censor_df <- censor_df[rep(1:nrow(censor_df), censor_df$censored), ]
+    names(censor_df)[names(censor_df)=='censored'] <- 'event'
+  }
   deaths_df$event <- 1 # code for event=death
   censor_df$event <- 0 # code for event=censoring
   # combine
