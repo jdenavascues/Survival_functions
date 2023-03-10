@@ -121,7 +121,7 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   if (length(extra_vars)>0){
     cat(paste('You have the additional variable(s):',
               paste(extra_vars, collapse=', ')), '\n')
-    cat('This/these will be passed on to the output dataframe, but otherwise ignored.\n')
+    cat('This/these will be either renamed (*censor*) or passed on to the output dataframe.\n')
   }
   # take care of the columns specifying dose
   names(df)[names(df)=='dose_units'] <- 'dose_unit'
