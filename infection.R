@@ -17,6 +17,7 @@ f <- function(x, y) {
 }
 
 check_cumulative <- function(df, rep_size) {
+  # NOT READY TO TAKE `rep_size` AS A DATAFRAME
   check <- df %>% group_by(genotype, treatment, replicate) %>%
     summarise(diff=diff(deaths), .groups='keep') %>%
     summarise(cumulative_xdiff=all(diff>=0), .groups='keep')
@@ -48,6 +49,7 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
       } else {
         t <- try( df <- read_excel(x, sheet='data') )
         if (inherits(t, "try-error")) {
+          # historically, previous template data files had the data in a 'tidy' sheet
           tt <- try( df <- read_excel(x, sheet='tidy') )
           if (inherits(tt, "try-error")) {
             df <- read_excel(x)
@@ -72,21 +74,27 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   # RECONCILE ARGUMENTS AND METADATA
   
   # `rep_size`
-  if (missing(rep_size)) {
+  if (missing(rep_size)) { # no argument value given
+    # extracting it from metadata
     if (exists('metadata')) {
       rep_size <- metadata[metadata$Category=='Replicate_size','Value'][[1]]
-      if (!is.numeric(rep_size)) {
+      if (rep_size=='table'){
+        rep_size <- read_excel(x, sheet='rep_size')
+        names(rep_size) <- str_to_lower( names(rep_size) )
+      } else if (!is.numeric(rep_size)) {
         cat('Something went wrong when establishing replicate sizes.\n')
         cat('A default value of rep_size=20 will be used.\n')
         rep_size = 20
       }
+    # not given neither as argument nor in 'metadata' sheet
     } else {
       cat("No replicate size was given so the default value of 20 will be used instead.")
       rep_size = 20 }
   }
+  
   # `cum`
-  if (missing(cum)) {
-    
+  if (missing(cum)) { # not argument value given
+    # getting it from metadata
     if (exists('metadata')) {
       cum <- metadata[metadata$Category=='Cumulative','Value'][[1]]
       t <- try(if (eval(parse(text=cum))) { cum <- TRUE }
@@ -152,8 +160,8 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   
   df <- df %>%
     mutate(
-      across(where(is.numeric), coalesce, 0),
-      across(where(is.character), coalesce, "NA")
+      across(where(is.numeric), \(x) coalesce(x, 0)),
+      across(where(is.character), \(x) coalesce(x, "NA"))
       )
   if ('sex' %in% names(df)) {
     df$sex[df$sex=='NA'] <- 'mixed'
@@ -211,7 +219,20 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   cat('establishing implicit censorings...\n')
   # the period indicates ALL the variables (the included ones, that is)
   surv_df <- aggregate(deaths ~ ., df[,c(included_vars, 'deaths')], sum)
-  surv_df$censored <- rep_size - surv_df$deaths
+  # if not all conditions have the same size
+  if (is.data.frame(rep_size)) {
+    try( if (nrow(rep_size)!=nrow(surv_df)) stop("the table reporting replicate sizes in the excel file does not have the appropriate number of rows."))
+    # find common colnames for surv_df and rep_size
+    rep_cols <- intersect(names(surv_df), names(rep_size))
+    # find the order of rep_size rows to match the variables order of surv_df
+    keys <- plyr::join.keys(surv_df,rep_size,rep_cols)
+    matches <- match(keys$y,keys$x,nomatch=(keys$n+1))
+    # use the new order to get numbers of survivors per vial at termination
+    surv_df$censored <- rep_size[order(matches),]$size - surv_df$deaths
+  # if all conditions have the same size it is much simpler:
+  } else if (is.numeric(rep_size)) {
+    surv_df$censored <- rep_size - surv_df$deaths
+  }
   for (r in 1:nrow(surv_df)) {
     # complete list of columns <--- this would need to be more generalised
     newrow <- surv_df[r,!names(surv_df) %in% c('deaths','censored')]
@@ -260,27 +281,3 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   
   return( fin_df )
 }
-# 
-# col_lin_test <- function(palette, ) {
-#   
-#   # Determine explanatory variables and their reference levels
-#   df[explanatory_vars] <- lapply(df[explanatory_vars], factor)
-#   df[explanatory_vars] <- Map(relevel, df[explanatory_vars], reference_lvls)
-#   
-#   # Determine labels
-#   
-#   # Determine colour/linetype combinations
-#   
-# }
-# 
-# prepare_for_plotting <- function(df, explanatory_vars, reference_lvls, for_print, sep='|') {
-# 
-#   # Determine explanatory variables and their reference levels
-#   df[explanatory_vars] <- lapply(df[explanatory_vars], factor)
-#   df[explanatory_vars] <- Map(relevel, df[explanatory_vars], reference_lvls)
-#   
-#   # Determine labels
-#   
-#   # Determine colour/linetype combinations
-#   
-# }
