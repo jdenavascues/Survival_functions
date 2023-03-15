@@ -16,6 +16,9 @@ f <- function(x, y) {
   paste(d, t)
 }
 
+# from https://stat.ethz.ch/pipermail/r-help/2011-September/289346.html:
+is.whole <- function(x) { is.numeric(x) && floor(x)==x }
+
 check_cumulative <- function(df, rep_size) {
   # NOT READY TO TAKE `rep_size` AS A DATAFRAME
   check <- df %>% group_by(genotype, treatment, replicate) %>%
@@ -81,7 +84,7 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
       if (rep_size=='table'){
         rep_size <- read_excel(x, sheet='rep_size')
         names(rep_size) <- str_to_lower( names(rep_size) )
-      } else if (!is.numeric(rep_size)) {
+      } else if (!is.whole(rep_size)) {
         cat('Something went wrong when establishing replicate sizes.\n')
         cat('A default value of rep_size=20 will be used.\n')
         rep_size = 20
