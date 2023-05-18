@@ -1,0 +1,241 @@
+---
+title: "Evaluation of pupation time with _drug_ and the _mut^1^_ allele"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    toc_depth: 3
+    highlight: haddock
+---
+
+## 1. Computing tools
+
+### Libraries
+```{r, message = FALSE, warning = FALSE}
+# data handling
+library(readxl)
+# stats
+library(survival)
+library(survminer)
+# for plotting
+library(ggthemes) # italics in the figures
+library(ggtext) # italics in the figures
+library(RColorBrewer)
+```
+
+### Custom function `analyse_spreadsheet`
+```{r, message = FALSE, warning = FALSE}
+devtools::source_url('https://raw.githubusercontent.com/jdenavascues/Survival_functions/main/development.R')
+#devtools::source_url('https://raw.githubusercontent.com/jdenavascues/Survival_functions/master/development.R')
+```
+
+## 2. Experiment parameters
+
+* Start date: 21.11.2022
+* Lab members: Keri-Ann
+* Genotypes: _wild-type_, _mut^1^_
+* Treatment: drug 0mM / 50mM
+* Treatment method: mixed in melted food, with E133 dye.
+
+## 3. Statistical analysis
+
+### 3.1.Prepare your data
+
+First load your data. You should have recorded it in a copy of the file
+`Pupariation_data_template.xlsx`, in this form:
+
+|   Date    |  Time  | Event | Treatment | Dose | Dose_unit | Genotype    | Replicate |
+|:---------:|:------:|------:|:----------|-----:|:----------|:------------|----------:|
+| DD.MM.YYYY | hh:mm |   0   |   *drug*  |   0  |   *mM*    | *wild-type* |    1      |
+| DD.MM.YYYY | hh:mm |   0   |   *drug*  |   0  |   *mM*    | *wild-type* |    2      |
+| DD.MM.YYYY | hh:mm |   0   |   *drug*  |   0  |   *mM*    | *wild-type* |    3      |
+| DD.MM.YYYY | hh:mm |   1   |   *drug*  |  50  |   *mM*    | *wild-type* |    1      |
+| DD.MM.YYYY | hh:mm |   0   |   *drug*  |  50  |   *mM*    | *wild-type* |    2      |
+| DD.MM.YYYY | hh:mm |   0   |   *drug*  |  50  |   *mM*    | *wild-type* |    3      |
+etc.
+
+This should be in the 'data' spreadsheet, with a 'metadata' spreadsheet specifying the characteristics of the experiment.
+This is a convenient way for humans to capture the data (time-based), while the `survival` statistics need an event-based recording.
+This is done with the function `load_devtime_data`:
+```{r, message = FALSE, warning = FALSE}
+# YOU WILL NEED TO ADAPT THESE LINES FOR R TO WORK WITH YOUR FILE IN YOUR COMPUTER
+filepath <- file.path('/Users/JQ/Documents/_CODE REPOS/GitHub/Survival_functions',
+                      'Pupariation_data_example.xlsx')
+data <- load_devtime_data(filepath)
+head(data, 5)
+```
+
+### 3.2.Data plotting and analysis
+
+#### 3.2.1-Analysis of replicates/outliers
+
+These experiments are sometimes temperamental, and have large batch variations, so first let us make sure that the replicates show homogeneous behaviour.
+Let's start with _wild-type_ flies:
+```{r, message = FALSE, warning = FALSE}
+colrs <- brewer.pal(12,"Paired")[c(2,8)]
+palette <- c(rep(colrs[1],4), rep(colrs[2],4))
+lty_all <- c("solid", "twodash", "dotted", "longdash", "dashed", "dotdash")
+line_type <- rep(lty_all[c(1,2,3,6)], 3)
+title <- 'Replicates of *wild-type* flies'
+legend_labs <- c("Control, R1", "Control, R2", "Control, R3", "Control, R4",
+                 "drug 50mM, R1", "drug 50mM, R2", "drug 50mM, R3", "drug 50mM, R4")
+model <- survfit(Surv(hour, event) ~ dose + replicate,
+                 data=subset(data, genotype=='*wild-type*'))
+
+g <- ggsurvplot(model, data=subset(data, genotype=='*wild-type*'),
+                pval = TRUE,                             # adds pval
+                fun = "event",                           # invert
+                conf.int = TRUE,                         # adds 95% confidence interval
+                conf.int.alpha = 0.1,                    # makes it more transparent
+                surv.median.line = "hv",                 # adds median points
+                palette = palette,
+                linetype = line_type,
+                title = title,
+                xlab = "Time (Hours)",                   # remove x axis label
+                ylab = "Pupariation Probability",        # y axis label
+                legend.title = "Replicates",             # legend title
+                font.legend = c(7),                      # legend size
+                legend = "bottom")                       # legend position
+
+l <- levels(g$data.survtable$strata)
+
+g$plot +
+  scale_linetype_manual(breaks=l, values=line_type, labels=legend_labs, guide=guide_legend(nrow = 2)) +
+  scale_colour_manual(breaks=l, values=palette, labels=legend_labs, guide=guide_legend(nrow = 2)) +
+  scale_fill_manual(breaks=l, values=palette, labels=legend_labs, guide=guide_legend(nrow = 2)) +
+  theme(legend.text=element_markdown(),
+        plot.title = element_markdown())
+```
+
+It does look like drug-50mM replicate 2 should be eliminated from the analysis.
+
+Now with _mut^1^_ flies:
+```{r}
+colrs <- brewer.pal(12,"Paired")[c(2,8)]
+palette <- c(rep(colrs[1],3), rep(colrs[2],3))
+lty_all <- c("solid", "twodash", "dotted", "longdash", "dashed", "dotdash")
+line_type <- rep(lty_all[c(1,2,3)], 2)
+title <- 'Replicates of *mut^1^* flies'
+legend_labs <- c("Control, R1", "Control, R2", "Control, R3",
+                 "drug 50mM, R1", "drug 50mM, R2", "drug 50mM, R3")
+model <- survfit(Surv(hour, event) ~ dose + replicate,
+                 data=subset(data, genotype=='*mut^1^*'))
+
+g <- ggsurvplot(model, data=subset(data, genotype=='*mut^1^*'),
+                pval = TRUE,                             # adds pval
+                fun = "event",                           # invert
+                conf.int = TRUE,                         # adds 95% confidence interval
+                conf.int.alpha = 0.1,                    # makes it more transparent
+                surv.median.line = "hv",                 # adds median points
+                palette = palette,
+                linetype = line_type,
+                title = title,
+                xlab = "Time (Hours)",                   # remove x axis label
+                ylab = "Pupariation Probability",        # y axis label
+                legend.title = "Replicates",             # legend title
+                font.legend = c(7),                      # legend size
+                legend = "bottom")                       # legend position
+
+l <- levels(g$data.survtable$strata)
+
+g$plot +
+  scale_linetype_manual(breaks=l, values=line_type, labels=legend_labs, guide=guide_legend(nrow = 2)) +
+  scale_colour_manual(breaks=l, values=palette, labels=legend_labs, guide=guide_legend(nrow = 2)) +
+  scale_fill_manual(breaks=l, values=palette, labels=legend_labs, guide=guide_legend(nrow = 2)) +
+  theme(legend.text=element_markdown(),
+        plot.title = element_markdown())
+```
+This is ok.
+So we can go ahead with everything but replicate 2 of wild-type, drug-50mM.
+
+#### 3.2.2-Full model
+
+```{r, message = FALSE, warning = FALSE}
+palette <- brewer.pal(12,"Paired")[c(1,2,7,8)]
+lty_all <- c("solid", "twodash", "dotted", "longdash", "dashed", "dotdash")
+line_type <- lty_all[c(1,4,1,4)]
+title <- 'Effect of *mut^1^* on response to 50mM drug'
+legend_labs <- c("*wild-type*, control", "*wild-type*, 50mM drug",
+                 "*mut^1^*, control", "*mut^1^*, 50mM drug")
+model <- survfit(Surv(hour, event) ~ genotype + dose,
+                 data=subset(data, !(genotype=='*wild-type*' & dose==50 & replicate==2)))
+
+g <- ggsurvplot(model,
+                data=subset(data, !(genotype=='*wild-type*' & dose==50 & replicate==2)),
+                pval = TRUE,                             # adds pval
+                fun = "event",                           # invert
+                conf.int = TRUE,                         # adds 95% confidence interval
+                conf.int.alpha = 0.1,                    # makes it more transparent
+                surv.median.line = "hv",                 # adds median points
+                palette = palette,
+                linetype = line_type,
+                title = title,
+                xlab = "Time (Hours)",                   # remove x axis label
+                ylab = "Pupariation Probability",        # y axis label
+                legend.title = "Treatment",             # legend title
+                font.legend = c(10),                      # legend size
+                legend = "bottom")                       # legend position
+
+l <- levels(g$data.survtable$strata)
+
+g$plot +
+  scale_linetype_manual(breaks=l, values=line_type, labels=legend_labs, guide=guide_legend(nrow = 2)) +
+  scale_colour_manual(breaks=l, values=palette, labels=legend_labs, guide=guide_legend(nrow = 2)) +
+  scale_fill_manual(breaks=l, values=palette, labels=legend_labs, guide=guide_legend(nrow = 2)) +
+  theme(legend.text=element_markdown(),
+        plot.title = element_markdown())
+```
+```{r, echo=FALSE}
+ggsave('mut_drug.pdf', plot=last_plot(),
+       width = 5,
+       height = 4,
+       units = "in",
+       dpi = 300)
+```
+
+```{r}
+## get median values with confidence interval
+surv_median(model)
+```
+
+```{r, warning= = FALSE, message = FALSE}
+ratedata <- load_devtime_data(filepath, censor=TRUE)
+tail(ratedata)
+```
+
+```{r, warning= = FALSE, message = FALSE}
+pupas <- ratedata %>%
+  subset(!(replicate==2 & genotype=='*wild-type*' & dose==50)) %>%
+  filter(event==1) %>%
+  group_by(genotype, dose, replicate) %>%
+  summarise(n())
+rep_size <- 50
+pupas$percent <- pupas$`n()`*100/rep_size
+pupas <- pupas[c('genotype', 'dose', 'percent')]
+pupas
+```
+```{r, message = FALSE, warning = FALSE}
+meanlines <- summarise(pupas, mean=mean(percent),
+                       by=interaction('genotype', 'dose'), .groups='keep')
+meanlines$x <- interaction(meanlines$genotype, meanlines$dose, sep=" | ")
+
+g <- ggplot(pupas, aes(x = interaction(genotype, dose, sep=" | "), y = percent)) +
+  geom_dotplot(binaxis='y', stackdir='center', stackratio=1.5, dotsize=1.2) +
+  geom_segment(data=meanlines,
+               aes(x=as.numeric(x)-0.5, xend=as.numeric(x)+0.5,
+                   y=mean, yend=mean),
+               colour='red',
+               size=1) +
+  labs(x = "Genotype | drug (mM)", y="Pupation rate") +
+  theme(axis.text.x=element_markdown(),
+        axis.text.y=element_markdown())
+g
+```
+
+```{r, echo=FALSE}
+ggsave('pupation_rates.pdf', plot=last_plot(),
+       width = 5,
+       height = 4,
+       units = "in",
+       dpi = 300)
+```
