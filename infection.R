@@ -38,49 +38,69 @@ check_cumulative <- function(df, rep_size) {
   return( cum )
 }
 
-analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
+analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cum, cph=FALSE) {
   
   # LOAD THE DATA
   
   # check input is a character
   if (is.character(x)) {
     # check input is a path to an Excel file
-    if (file.exists(x) & startsWith(format_from_signature(filepath),'xl')){
+    if (file.exists(x) & startsWith(format_from_signature(filepath),'xl')) {
       # check `sheet` is specified
-      if (!missing(sheet)){
-        df <- read_excel(x, sheet=sheet)
+      if (!missing(dsheet)){
+        df <- read_excel(x, sheet=dsheet)
+        cat("`analyse_spreadsheet` will extract data from sheet `", dsheet, "`.\n", sep='')
       } else {
-        t <- try( df <- read_excel(x, sheet='data') )
-        if (inherits(t, "try-error")) {
+        if (!is.na(match("data", str_to_lower( (excel_sheets(filepath)) )))) {
+          d <- match("data", str_to_lower(excel_sheets(filepath)))
+          df <- read_excel(x, sheet=excel_sheets(filepath)[d])
+          cat("`analyse_spreadsheet` will extract data from sheet `data` (deduced).\n")
+        } else if (!is.na(match("tidy", str_to_lower( (excel_sheets(filepath)) )))) {
           # historically, previous template data files had the data in a 'tidy' sheet
-          tt <- try( df <- read_excel(x, sheet='tidy') )
-          if (inherits(tt, "try-error")) {
-            df <- read_excel(x)
-            message('You have not provided a spreadsheet name, nor your Excel file has\nany of the usual names for time-to-event data in the lab.\nWe will continue using whatever is in the first sheet.')
+          d <- match("tidy", str_to_lower(excel_sheets(filepath)))
+          df <- read_excel(x, sheet=excel_sheets(filepath)[d])
+          cat("`analyse_spreadsheet` will extract data from sheet `tidy` (deduced).\n")
+        } else {
+          df <- read_excel(x)
+          message(cat('You have not provided a spreadsheet name, nor your Excel file has\n',
+                      'any of the usual names for time-to-event data in the lab.\n',
+                      'We will continue using whatever is in the first sheet.', sep=''))
           }
         }
-      }
       # check that the Excel file has a 'metadata' sheet (ignoring capitalisation)
-      if (!is.na(match("metadata", str_to_lower( (excel_sheets(filepath)) )))) {
-        m <- match("metadata", str_to_lower(excel_sheets(filepath)))
-        metadata <- read_excel(x, sheet=excel_sheets(filepath)[m])
+      if (!missing(msheet)){
+        df <- read_excel(x, sheet=msheet)
+        cat("`analyse_spreadsheet` will read metadata from sheet `", msheet, "`.\n", sep='')
+      } else {
+        if (!is.na(match("metadata", str_to_lower( (excel_sheets(filepath)) )))) {
+          m <- match("metadata", str_to_lower(excel_sheets(filepath)))
+          metadata <- read_excel(x, sheet=excel_sheets(filepath)[m])
+          cat("`analyse_spreadsheet` will read metadata from sheet `metadata` (deduced).\n")
+        } else {
+          cat('You have not provided a spreadsheet name for the experiment\'s metadata,\n',
+              'nor your Excel file has any of the usual names for time-to-event ',
+              'metadata in the lab.\nWe will continue using default values.', sep='')
+        }
       }
     }
     # if it is not a path, then check if it is a dataframe
   } else if (is.data.frame(x)) {
     df <- x
+    cat("`analyse_spreadsheet` will read the data from a dataframe object.\n",
+        "No checks on the data will be performed at this point.\n")
   } else {
     cat("`analyse_spreadsheet` cannot use the input data.\n")
-    cat("`x` must be a suitable dataframe or a path to a suitable Excel file.")
+    cat("`x` must be a suitable dataframe or a path to a suitable Excel file.\n")
     break }
-  
+
   # RECONCILE ARGUMENTS AND METADATA
   
   # `rep_size`
   if (missing(rep_size)) { # no argument value given
     # extracting it from metadata
     if (exists('metadata')) {
-      rep_size <- metadata[metadata$Category=='Replicate_size','Value'][[1]]
+      rep_size <- as.numeric(metadata[metadata$Category=='Replicate_size','Value'][[1]])
+      cat("Individual number (`rep_size`) is deduced to be ", rep_size, " for all strata and replicates.\n", sep='')
       if (rep_size=='table'){
         rep_size <- read_excel(x, sheet='rep_size')
         names(rep_size) <- str_to_lower( names(rep_size) )
@@ -91,7 +111,7 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
       }
     # not given neither as argument nor in 'metadata' sheet
     } else {
-      cat("No replicate size was given so the default value of 20 will be used instead.")
+      cat("No replicate size was given so the default value of 20 will be used instead.\n")
       rep_size = 20 }
   }
   
@@ -284,6 +304,4 @@ analyse_spreadsheet <- function(x, sheet, rep_size, cum, cph=FALSE) {
   
   return( fin_df )
 }
-
-# generated by GPTchat:
 
