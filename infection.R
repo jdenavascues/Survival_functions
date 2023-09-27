@@ -100,7 +100,7 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cum, cph=FALSE) {
     # extracting it from metadata
     if (exists('metadata')) {
       rep_size <- as.numeric(metadata[metadata$Category=='Replicate_size','Value'][[1]])
-      cat("Individual number (`rep_size`) is deduced to be ", rep_size, " for all strata and replicates.\n", sep='')
+      cat("The metadata reads that there are ", rep_size, " experimental individuals in all replicates for all strata.\n", sep='')
       if (rep_size=='table'){
         rep_size <- read_excel(x, sheet='rep_size')
         names(rep_size) <- str_to_lower( names(rep_size) )
@@ -111,7 +111,7 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cum, cph=FALSE) {
       }
     # not given neither as argument nor in 'metadata' sheet
     } else {
-      cat("No replicate size was given so the default value of 20 will be used instead.\n")
+      cat("No replicate size was given/found so the default value of 20 will be used instead.\n")
       rep_size = 20 }
   }
   
@@ -122,12 +122,15 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cum, cph=FALSE) {
       cum <- metadata[metadata$Category=='Cumulative','Value'][[1]]
       t <- try(if (eval(parse(text=cum))) { cum <- TRUE }
                else if (!eval(parse(text=cum))) { cum <- FALSE })
-      if(inherits(t, 'try-error')) { cum = check_cumulative(df, rep_size) }
+      if(inherits(t, 'try-error')) { cum <- check_cumulative(df, rep_size) }
     } else {
-      cat('There is no input information about whether the data is recorded cumulatively.\n')
-      cat('`analyse_spreadsheet` will attempt to deduce the value.')
-      cum = check_cumulative(df, rep_size)
+      cat('There is no input information about whether events were recorded cumulatively.\n')
+      cat('`analyse_spreadsheet` will attempt to deduce the value.\n')
+      cum <- check_cumulative(df, rep_size)
     }
+  } else {
+    if (cum) cat('User has specified that events were recorded cumulatively.\n')
+    else cat('User has specified that events were recorded cumulatively.\n')
   }
 
   # STANDARDISE COLUMN NAMES
@@ -137,16 +140,16 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cum, cph=FALSE) {
   names(df) <- str_to_lower(names(df))
   # check that the essential variables are there:
   usual_vars <- c('genotype', 'treatment', 'sex', 'replicate', 'dose')
-  all_vars <- c("date", "time", "deaths", "censored", "treatment",
+  all_vars <- c("date", "time", "deaths", "dead", "censorings", "censored", "treatment",
                 "dose", "dose_unit", "genotype", "replicate", "sex")
   extra_vars <- setdiff(names(df), all_vars)
   confirmed_vars <- intersect(names(df), usual_vars)
   if (length(confirmed_vars)==0){
-    cat('You do not seem to have any of the usual variables (genotype, treatment, sex).\n')
+    cat('You do not seem to have any of the usual variables (genotype, treatment, dose, sex, replicate).\n')
     cat('Verify your dataset and if necessary, rename the columns.\n')
     break
   } else {
-    cat(paste('You have', length(confirmed_vars), 'of the usual variables:',
+    cat(paste('You have', length(confirmed_vars), 'of the 5 usual variables:',
               paste(confirmed_vars, collapse=', ')), '\n')
   }
   if (length(extra_vars)>0){
