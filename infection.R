@@ -5,6 +5,12 @@ library(dplyr)
 library(tidyr)
 library(stringr)
 
+### PENDING:
+# - catch naming/missing data errors when checking column names
+# - implementing the use of rep_size as a table
+# - remove recorded censorship from automated total !!!
+
+
 f <- function(x, y) {
   # this is just to change the format of the date.
   fout <- "%Y-%m-%d"
@@ -31,17 +37,18 @@ check_cumulative <- function(df, rep_size) {
   cumulative_compatible$sum <- check$cumulative_xsum
   cumulative_compatible$cumulative <- (cumulative_compatible$diff | cumulative_compatible$sum)
   if ( all(cumulative_compatible$cumulative) ) {
-    cum = TRUE
+    cumul = TRUE
   } else {
-    cum = FALSE
+    cumul = FALSE
   }
-  return( cum )
+  return( cumul )
 }
 
-analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cum, cph=FALSE) {
+analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cumul, cph=FALSE) {
   
   # LOAD THE DATA
-  
+  # =============
+  ### For an MS Excel file:
   # check input is a character
   if (is.character(x)) {
     # check input is a path to an Excel file
@@ -83,59 +90,97 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cum, cph=FALSE) {
         }
       }
     }
-    # if it is not a path, then check if it is a dataframe
+  ### For an existing R dataframe object:
+  # check input is a dataframe
   } else if (is.data.frame(x)) {
     df <- x
     cat("`analyse_spreadsheet` will read the data from a dataframe object.\n",
         "No checks on the data will be performed at this point.\n")
+  ### For any other input:
   } else {
     cat("`analyse_spreadsheet` cannot use the input data.\n")
     cat("`x` must be a suitable dataframe or a path to a suitable Excel file.\n")
     break }
 
   # RECONCILE ARGUMENTS AND METADATA
-  
-  # `rep_size`
-  if (missing(rep_size)) { # no argument value given
+  # ================================
+  ### For number of individuals per stratum replicate (`rep_size`):
+  # case no argument given:
+  if (missing(rep_size)) {
     # extracting it from metadata
     if (exists('metadata')) {
       rep_size <- as.numeric(metadata[metadata$Category=='Replicate_size','Value'][[1]])
       cat("The metadata reads that there are ", rep_size, " experimental individuals in all replicates for all strata.\n", sep='')
+      # in case the rep_size is not the same for all stratum replicates:
       if (rep_size=='table'){
         rep_size <- read_excel(x, sheet='rep_size')
         names(rep_size) <- str_to_lower( names(rep_size) )
+        cat('Sizes of stratum replicates are not equal.\n',
+            '`analyse_spreadsheet` is not ready yet to process this data.\n',
+            'A default value of rep_size=20 will be used.\n')
+        rep_size <- 20
       } else if (!is.whole(rep_size)) {
-        cat('Something went wrong when establishing replicate sizes.\n')
-        cat('A default value of rep_size=20 will be used.\n')
-        rep_size = 20
+        cat('Something went wrong when establishing replicate sizes.\n',
+            'A default value of rep_size=20 will be used.\n', sep=='')
+        rep_size <- 20
       }
-    # not given neither as argument nor in 'metadata' sheet
-    } else {
-      cat("No replicate size was given/found so the default value of 20 will be used instead.\n")
-      rep_size = 20 }
+    }
   }
-  
-  # `cum`
-  if (missing(cum)) { # not argument value given
+  # rep_size also missing from metadata
+  } else {
+      cat('No replicate size was given nor found in the metadata.\n',
+          'A default value of 20 will be used.\n')
+      rep_size <- 20
+  }
+  # case argument given: check if value is appropriate
+  test <- try( rep_size%%1 == 0 )
+  # if it is not a number
+  if( inherits(test, 'try-error') ) {
+    cat('You have not provided a valid value for the size of stratum replicates.\n')
+    test[1]
+  # if it is not a whole number
+  } else if( !test ) {
+    cat('You have not provided a whole number for the size of stratum replicates.\n',
+        'The value (', rep_size, ') will be rounded to (', round(rep_size), ').\n', sep=='')
+    rep_size <- round(rep_size)
+  }
+  ### For the type of event recording (`cumul`): all events (cumulative) or new events
+  # case no argument given
+  if (missing(cumul)) {
     # getting it from metadata
     if (exists('metadata')) {
-      cum <- metadata[metadata$Category=='Cumulative','Value'][[1]]
-      t <- try(if (eval(parse(text=cum))) { cum <- TRUE }
-               else if (!eval(parse(text=cum))) { cum <- FALSE })
-      if(inherits(t, 'try-error')) { cum <- check_cumulative(df, rep_size) }
+      cumul <- metadata[metadata$Category=='cumulative','Value'][[1]]
+      t <- try(if (eval(parse(text=cumul))) { cumul <- TRUE }
+               else if (!eval(parse(text=cumul))) { cumul <- FALSE })
+      if(inherits(t, 'try-error')) { cumul <- check_cumulative(df, rep_size) }
     } else {
       cat('There is no input information about whether events were recorded cumulatively.\n')
       cat('`analyse_spreadsheet` will attempt to deduce the value.\n')
-      cum <- check_cumulative(df, rep_size)
+      cumul <- check_cumulative(df, rep_size)
     }
   } else {
-    if (cum) cat('User has specified that events were recorded cumulatively.\n')
+    if (cumul) cat('User has specified that events were recorded cumulatively.\n')
     else cat('User has specified that events were recorded cumulatively.\n')
+  }
+  # case argument given
+  if(!missing(cumul)) {
+    # data does not coincide with user's declaration
+    if(!cumul == check_cumulative(df, rep_size)) {
+    if( cumul ) {
+      cat('You have specified that events were recorded CUMULATIVELY.\n',
+          'However, the data seem to have been recorded NON-cumulatively.\n',
+          '`analyse_spreadsheet` will go ahead assuming this was an error on your part;\n',
+          '---> PLEASE CHECK YOUR DATA <---', sep='')
+    } else {
+      cat('You have specified that events were recorded NON-cumulatively.\n',
+          'However, the data seem to have been recorded CUMULATIVELY.\n',
+          '`analyse_spreadsheet` will go ahead assuming this was an error on your part;\n',
+          '---> PLEASE CHECK YOUR DATA <---', sep='')
+      }
   }
 
   # STANDARDISE COLUMN NAMES
-  # pending: catch naming/missing data errors here <----------------------------
-  
+  # ========================
   # make lowercase
   names(df) <- str_to_lower(names(df))
   # check that the essential variables are there:
@@ -183,7 +228,7 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cum, cph=FALSE) {
   }
 
   # CLEAN UP NAs
-  
+  # ============
   df <- df %>%
     mutate(
       across(where(is.numeric), \(x) coalesce(x, 0)),
@@ -194,32 +239,30 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cum, cph=FALSE) {
   }
   
   # ESTABLISH TIME INTERVALS
-  
+  # ========================
   cat('establishing time intervals...\n')
   format_in <- "%d.%m.%Y"
   df$date <- as.Date(df$date, format=format_in)
   df$time2 <- apply(df[,c('date', 'time')], 1, function(w) f(w['date'], w['time']))
   df$time2 <- as.POSIXct(df$time2)
   df$hour <- signif(difftime(df$time2, df$time2[1], units = "hours"), 3)
-  
-  # IN CASE DATA IS RECORDED CUMULATIVELY
-  
+  ### In case the data are recorded cumulatively
   cat('establishing individual events (non-cumulative)...\n')
   excluded_vars <- c('date','time','hour','time2','deaths','censored') # this may have to change depending on the project
   included_vars <- names(df)[!names(df) %in% excluded_vars]
-  if (cum) {
+  if (cumul) {
     var_combos <- unique(expand_grid(df[included_vars]))
     for (row in 1:nrow(var_combos)) {
       combo <- var_combos[row, ]
       combo_rows <- apply(df[included_vars],1,function(x) {all(x==combo)})
-      deaths_cum <- df[combo_rows,'deaths']
-      newdeaths <- c(0, diff(deaths_cum$deaths))
+      deaths_cumul <- df[combo_rows,'deaths']
+      newdeaths <- c(0, diff(deaths_cumul$deaths))
       df[combo_rows,]$deaths <- newdeaths
     }
   }
   
   # ESTABLISH NUMBER OF RECORDED EVENTS
-  
+  # ===================================
   cat('establishing death numbers...\n')
   cat('establishing explicit censorings...\n')
   # remove rows without data (deaths/censored separately)
@@ -238,10 +281,7 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cum, cph=FALSE) {
   # combine
   fin_df <- rbind(deaths_df, censor_df)
   fin_df$maxhour <- max(fin_df$hour)
-  
-  # INCLUDE NON-RECORDED CENSORSHIP
-  # pending: remove recorded censorship from automated total <-----------------------
-  
+  ### Include non-recorded censorship (endpoint or missed)
   cat('establishing implicit censorings...\n')
   # the period indicates ALL the variables (the included ones, that is)
   surv_df <- aggregate(deaths ~ ., df[,c(included_vars, 'deaths')], sum)
@@ -273,13 +313,13 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cum, cph=FALSE) {
   }
   
   # COLUMN CLEANUP <--------- quite ad hoc!
-  
+  # ==============
   returned_vals <- c(included_vars, 'event', 'hour', 'time2')
   fin_df <- fin_df[,returned_vals]
   fin_df <- fin_df %>% rename(time = time2)
   
-  # SURVIVAL MODELLING
-  
+  # BASIC SURVIVAL MODELLING
+  # ========================
   cat('\nCox PH MODELLING\n')
   cat('\n----------------\n')
   if (cph) {
