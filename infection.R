@@ -69,7 +69,7 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cum, cph=FALSE) {
         }
       # check that the Excel file has a 'metadata' sheet (ignoring capitalisation)
       if (!missing(msheet)){
-        df <- read_excel(x, sheet=msheet)
+        metadata <- read_excel(x, sheet=msheet)
         cat("`analyse_spreadsheet` will read metadata from sheet `", msheet, "`.\n", sep='')
       } else {
         if (!is.na(match("metadata", str_to_lower( (excel_sheets(filepath)) )))) {
@@ -149,7 +149,7 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cum, cph=FALSE) {
     cat('Verify your dataset and if necessary, rename the columns.\n')
     break
   } else {
-    cat(paste('You have', length(confirmed_vars), 'of the 5 usual variables:',
+    cat(paste('You have', length(confirmed_vars), 'of the 5 usual explanatory variables:',
               paste(confirmed_vars, collapse=', ')), '\n')
   }
   if (length(extra_vars)>0){
