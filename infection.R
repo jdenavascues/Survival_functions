@@ -168,21 +168,20 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cumul, cph=FALSE) {
   } else {
     if (cumul) cat('User has specified that events were recorded cumulatively.\n')
     else cat('User has specified that events were recorded cumulatively.\n')
-  }
   # case argument given
-  if(!missing(cumul)) {
+  } else {
     # data does not coincide with user's declaration
     if(!cumul == check_cumulative(df, rep_size)) {
-    if( cumul ) {
-      cat('You have specified that events were recorded CUMULATIVELY.\n',
-          'However, the data seem to have been recorded NON-cumulatively.\n',
-          '`analyse_spreadsheet` will go ahead assuming this was an error on your part;\n',
-          '---> PLEASE CHECK YOUR DATA <---', sep='')
-    } else {
-      cat('You have specified that events were recorded NON-cumulatively.\n',
-          'However, the data seem to have been recorded CUMULATIVELY.\n',
-          '`analyse_spreadsheet` will go ahead assuming this was an error on your part;\n',
-          '---> PLEASE CHECK YOUR DATA <---', sep='')
+      if( cumul ) {
+        cat('You have specified that events were recorded CUMULATIVELY.\n',
+            'However, the data seem to have been recorded NON-cumulatively.\n',
+            '`analyse_spreadsheet` will go ahead assuming this was an error on your part;\n',
+            '---> PLEASE CHECK YOUR DATA <---', sep='')
+      } else {
+        cat('You have specified that events were recorded NON-cumulatively.\n',
+            'However, the data seem to have been recorded CUMULATIVELY.\n',
+            '`analyse_spreadsheet` will go ahead assuming this was an error on your part;\n',
+            '---> PLEASE CHECK YOUR DATA <---', sep='')
       }
     }
   }
