@@ -118,33 +118,39 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cumul, cph=FALSE) {
         names(rep_size) <- str_to_lower( names(rep_size) )
         cat('Sizes of stratum replicates are not equal.\n',
             '`analyse_spreadsheet` is not ready yet to process this data.\n',
-            'A default value of rep_size=20 will be used.\n')
+            'A default value of rep_size=20 will be used.\n', sep='')
         rep_size <- 20
-      } else if (!is.whole(rep_size)) {
-        cat('Something went wrong when establishing replicate sizes.\n',
-            'A default value of rep_size=20 will be used.\n', sep=='')
-        rep_size <- 20
+      } else {
+        test <- try( rep_size%%1 == 0 )
+        # if it is NA or N.A.N.
+        if( inherits(test, 'try-error') ) {
+          cat('The metadata does not contain a valid value for the size of stratum replicates.\n',
+              test[1], '\n',
+              'A default value of rep_size=20 will be used.\n', sep='')
+          rep_size <- 20
+        # if it is not a whole number
+        } else if( !test ) {
+          cat('You have not provided a whole number for the size of stratum replicates.\n',
+              'The value (', rep_size, ') will be rounded to (', round(rep_size), ').\n', sep='')
+          rep_size <- round(rep_size)
+        }
       }
     }
-  }
-  # rep_size also missing from metadata
-  } else {
-      cat('No replicate size was given nor found in the metadata.\n',
-          'A default value of 20 will be used.\n')
-      rep_size <- 20
-  }
   # case argument given: check if value is appropriate
-  test <- try( rep_size%%1 == 0 )
-  # if it is not a number
-  if( inherits(test, 'try-error') ) {
-    cat('You have not provided a valid value for the size of stratum replicates.\n')
-    test[1]
-  # if it is not a whole number
-  } else if( !test ) {
-    cat('You have not provided a whole number for the size of stratum replicates.\n',
-        'The value (', rep_size, ') will be rounded to (', round(rep_size), ').\n', sep=='')
-    rep_size <- round(rep_size)
+  } else {
+    test <- try( rep_size%%1 == 0 )
+    # if it is not a number
+    if( inherits(test, 'try-error') ) {
+      cat('You have not provided a valid value for the size of stratum replicates.\n')
+      test[1]
+    # if it is not a whole number
+    } else if( !test ) {
+      cat('You have not provided a whole number for the size of stratum replicates.\n',
+          'The value (', rep_size, ') will be rounded to (', round(rep_size), ').\n', sep=='')
+      rep_size <- round(rep_size)
+    }
   }
+  
   ### For the type of event recording (`cumul`): all events (cumulative) or new events
   # case no argument given
   if (missing(cumul)) {
