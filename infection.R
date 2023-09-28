@@ -67,7 +67,7 @@ load_data <- function(sour_ce, x, dsheet) {
       } else if (!is.na(match("tidy", str_to_lower( (excel_sheets(filepath)) )))) {
         # historically, previous template data files had the data in a 'tidy' sheet
         d <- match("tidy", str_to_lower(excel_sheets(filepath)))
-        df <- read_excel(x, sheet=excel_sheets(filepath)[d])
+        dat <- read_excel(x, sheet=excel_sheets(filepath)[d])
         cat("`analyse_spreadsheet` will extract data from sheet `tidy` (deduced).\n")
       } else {
         dat <- read_excel(x)
@@ -141,7 +141,7 @@ set_rep_size <- function(dat, metadata, rep_size) {
     # extract it from metadata
     if (!is.null(metadata)) {
       rep_size <- as.numeric(metadata[metadata$Category=='Replicate_size','Value'][[1]])
-      cat("Replicate size information found in the metadata")
+      cat("Replicate size information found in the metadata.\n")
       # in case the rep_size is not the same for all stratum replicates:
       if (rep_size=='table'){
         rep_size <- read_excel(x, sheet='rep_size')
@@ -166,13 +166,13 @@ check_rec_style <- function(dat, rep_size, strata_vars) {
   # check, for all strata, which replicates are compatible with 'cumulative' recording
   # (i.e. show constant or ever-increasing event records)
   check <- dat %>%
-    reframe(diff=diff(deaths), .by=all_of(strata_vars)) %>%
+    reframe(diff=diff(events), .by=all_of(strata_vars)) %>%
     reframe(cumulative_xdiff=all(diff>=0),  .by=all_of(strata_vars))
   cumulative_compatible <- data.frame(diff = check$cumulative_xdiff)
   # check, for all strata, that total events are compatible with 'cumulative' recording
   # (i.e. sum of all events "expressed" is not larger than rep_size)
   check <- dat %>%
-    summarise(sum=sum(deaths), .by=all_of(strata_vars)) %>%
+    summarise(sum=sum(events), .by=all_of(strata_vars)) %>%
     summarise(cumulative_xsum=all(sum>rep_size), .by=all_of(strata_vars))
   cumulative_compatible$sum <- check$cumulative_xsum
   # if all strata replicates have records that are always increasing or
@@ -206,94 +206,203 @@ set_recording_style <- function(rec_style, dat, metadata, rep_size, strata_vars)
       if(!rec_style %in% c('cumulative', 'new')) {
         cat('The metadata provided no valid information about whether events were recorded cumulatively.\n',
             '`analyse_spreadsheet` will attempt to deduce this from the data.\n', sep='')
-        rec_style <- check_rec_style(dat, rep_size, strata_vars) }
+        rec_style <- check_rec_style(dat, rep_size, strata_vars)
+      }
     # if metadata does not exist, deduce `rec_style` from the data
     } else {
       cat('There is no input information about whether events were recorded cumulatively.\n',
           '`analyse_spreadsheet` will attempt to deduce this from the data.\n', sep='')
       rec_style <- check_rec_style(dat, rep_size, strata_vars)
     }
-    # case argument given
+  # if argument given:
   } else {
-    # and `rec_style` is ok
-    if(rec_style == check_rec_style(dat, rep_size, strata_vars)) {
-      if (rec_style) cat('User has specified that events were recorded cumulativeLY.\n')
-      else cat('User has specified that events were NOT recorded cumulatively.\n')
-      # but if data do not coincide with user's declaration...
-    } else {
-      if( rec_style ) {
-        cat('You have specified that events were recorded cumulativeLY.\n',
-            'However, the data seem to have been recorded NON-cumulatively.\n',
-            '`analyse_spreadsheet` will go ahead assuming this was an error on your part;\n',
-            '---> PLEASE CHECK YOUR DATA <---', sep='')
+    # `rec_style` is declared as 'new'
+    if (rec_style == 'new') {
+      cat('You have specified that events were NOT recorded cumulatively.\n')
+      if (rec_style==check_rec_style(dat, rep_size, strata_vars)) {
+        cat('The data seem to have been recorded in this way.\n')
       } else {
-        cat('You have specified that events were recorded NON-cumulatively.\n',
-            'However, the data seem to have been recorded cumulativeLY.\n',
-            '`analyse_spreadsheet` will go ahead assuming this was an error on your part;\n',
+        cat('However, the data seem to have been recorded CUMULATIVELY.\n',
+            '`analyse_spreadsheet` will go ahead assuming this was an error on your part,\n',
+            'and analyse the data as if they were recorded cumulatively.\n',
             '---> PLEASE CHECK YOUR DATA <---', sep='')
+        rec_style <- check_rec_style(dat, rep_size, strata_vars)
       }
+    # `rec_style` is declared as 'cumulative'
+    } else if (rec_style == 'cumulative') {
+      cat('You have specified that events were recorded CUMULATIVELY.\n')
+      if (rec_style==check_rec_style(dat, rep_size, strata_vars)) {
+        cat('The data seem to have been recorded in this way.\n')
+      } else {
+        cat('However, the data seem to have been recorded NON-cumulatively.\n',
+            '`analyse_spreadsheet` will go ahead assuming this was an error on your part,\n',
+            'and analyse the data as if they were recorded non-cumulatively.\n',
+            '---> PLEASE CHECK YOUR DATA <---', sep='')
+        rec_style <- check_rec_style(dat, rep_size, strata_vars)
+      }
+    } else {
+      cat('You have provided an invalid option for how the events were recorded.\n',
+          '`analyse_spreadsheet` will attempt to deduce this from the data.\n', sep='')
+      rec_style <- check_rec_style(dat, rep_size, strata_vars)
     }
   }
+  return (rec_style)
 }
 
 # --------------------------------------------------------------------
 
-data_cleanup <- function(dat) {
-  # clean up NAs
+data_cleanup <- function(dat, explanatory_vars, all_vars) {
+  ### column name cleanup
+  # identify columns with date data
+  date_match <- grep("date|^day", names(dat))
+  if (length(date_match)==0) {
+    stop(
+      cat('You do not seem to have any column specifying the date of the observations, ',
+          'or it is NOT named in any of the usual ways ("date", "day", and derivatives).\n',
+          '`analyze_spreadsheet` cannot continue without these data.\n',
+          'Verify your dataset and, if necessary, rename the columns.\n', sep='')
+    )
+  } else if (length(date_match)>1) {
+    stop(
+      cat('You seem to have more than one column specifying dates, ',
+          'according to the usual names for this ("date", "day", and derivatives).\n',
+          '`analyze_spreadsheet` cannot continue with this ambiguity.\n',
+          'Verify your dataset and, if necessary, rename the columns.\n', sep='')
+    )
+  } else if (length(date_match)==1) {
+    names(dat)[date_match] <- 'date'
+  }
+
+  # identify columns with time data
+  time_match <- grep("time|hour|hh", names(dat))
+  if (length(time_match)==0) {
+    strop(
+      cat('You do not seem to have any column specifying the time of the day of the observations, ',
+          'or it is NOT named in any of the usual ways ("time", "hour", "hh:mm", and derivatives).\n',
+          '`analyze_spreadsheet` cannot continue without these data.\n',
+          'Verify your dataset and, if necessary, rename the columns.\n', sep='')
+    )
+  } else if (length(time_match)>1) {
+    stop(
+      cat('You seem to have more than one column specifying time of the day, ',
+          'according to the usual names for this ("time", "hour", "hh:mm", and derivatives).\n',
+          '`analyze_spreadsheet` cannot continue with this ambiguity.\n',
+          'Verify your dataset and, if necessary, rename the columns.\n', sep='')
+    )
+  } else if (length(time_match)==1) {
+    names(dat)[time_match] <- 'time'
+  }
+
+  # identify columns with event data
+  event_match <- grep("death|dead|event", names(dat))
+  if (length(event_match)==0) {
+    stop(
+      cat('You do not seem to have any column with event data, ',
+          'or it is NOT named in any of the usual ways ("deaths", "dead", "events", and derivatives)).\n',
+          '`analyze_spreadsheet` cannot continue without these data.\n',
+          'Verify your dataset and, if necessary, rename the columns.\n', sep='')
+    )
+  } else if (length(event_match)>1) {
+    stop(
+      cat('You seem to have more than one column with event data, ',
+          'according to the usual names for this ("deaths", "dead", "events", and derivatives).\n',
+          '`analyze_spreadsheet` cannot continue with this ambiguity.\n',
+          'Verify your dataset and, if necessary, rename the columns.\n', sep='')
+    )
+  } else if (length(event_match)==1) {
+    names(dat)[event_match] <- 'events'
+  }
+  
+  # identify columns with censoring data
+  censoring_match <- grep("censor", names(dat))
+  if (length(censoring_match)==0) {
+    cat('You do not seem to have any column with censoring data, ',
+        'or it is NOT named in any of the usual ways ("censored", "censoring", and derivatives).\n',
+        '`analyze_spreadsheet` will continue assuming that all individuals were censored ',
+        'after the last observational timepoint.\n',
+        'If this is not what happened, verify your dataset and, if necessary, rename the columns.\n', sep='')
+  } else if (length(censoring_match)>1) {
+    stop(
+      cat('You seem to have more than one column with censoring data, ',
+          'according to the usual names for this ("censored", "censoring", and derivatives).\n',
+          '`analyze_spreadsheet` cannot continue with this ambiguity.\n',
+          'Verify your dataset and, if necessary, rename the columns.\n', sep='')
+    )
+  } else if (length(censoring_match)==1) {
+    names(dat)[censoring_match] <- 'censored'
+  }
+  
+  # identify column with dose unit data (before identifying dose column)
+  unit_match <- grep("unit", names(dat))
+  if (length(unit_match)==0) {
+    cat('You do not seem to have any column with specifying the units used to describe the dose of a treatment.\n',
+        '`analyze_spreadsheet` will continue assuming that this is not relevant.\n',
+        'If this is not the case, verify your dataset and, if necessary, rename the columns.\n', sep='')
+  } else if (length(unit_match)>1) {
+    cat('You seem to have more than one column expressing units (presumably of a treatment dose).\n',
+        '`analyze_spreadsheet` will continue assuming that this is not relevant, and drop these data.\n',
+        'If this is not the case, verify your dataset and, if necessary, rename the columns.\n', sep='')
+    dat <- select(dat, -names(dat)[unit_match])
+  } else if (length(unit_match)==1) {
+    names(dat)[unit_match] <- 'dose_unit'
+  }
+  
+  # identify column with dose data
+  dose_match <- names(dat)[setdiff(grep("dose", names(dat)), grep("_unit", names(dat)))]
+  if (length(dose_match)==0) {
+    cat('You do not seem to have any column with specifying the dose of a treatment.\n',
+        '`analyze_spreadsheet` will continue assuming that this is not relevant.\n',
+        'If this is not the case, verify your dataset and, if necessary, rename the columns.\n', sep='')
+  } else if (length(dose_match)>1) {
+    cat('You seem to have more than one column expressing treatment dose.\n',
+        '`analyze_spreadsheet` will continue assuming that this is not relevant, and drop these data.\n',
+        'If this is not the case, verify your dataset and, if necessary, rename the columns.\n', sep='')
+    dat <- select(dat, -names(dat)[dose_match])
+  } else if (length(dose_match)==1) {
+    names(dat)[dose_match] <- 'dose'
+  }
+
+  # check for sensible column names for basic variables
+  confirmed_vars <- intersect(names(dat), explanatory_vars)
+  if (length(confirmed_vars)==0){
+    stop(
+      cat('You do not seem to have any of the usual variables ',
+          '(genotype, treatment, dose, sex, replicate).\n',
+          '`analyze_spreadsheet` cannot continue without at least some of these data.\n',
+          'Verify your dataset and, if necessary, rename the columns.\n', sep='')
+      )
+  } else if (length(confirmed_vars)==5) {
+    cat('The usual explanatory variables are: ',
+        '"genotype", "treatment", "dose", "sex" and "replicate".\n',
+        'You seem to have all ', length(confirmed_vars), ' of them.\n', sep='')
+  } else {
+    cat('The usual explanatory variables are: ',
+        '"genotype", "treatment", "dose", "sex" and "replicate".\n',
+        'You seem to have ', length(confirmed_vars), ' of them: ',
+        paste(confirmed_vars, collapse=', '), '.\n',
+        '`analyze_spreadsheet` will continue using these explanatory variables only.\n',
+        'If this is not correct, verify your dataset and rename columns as required.\n', sep='')
+  }
+
+  # remove un-interpretable columns
+  extra_vars <- setdiff(names(dat), all_vars)
+  if (length(extra_vars)>0){
+    cat('You have the additional variable(s):',
+        paste(extra_vars, collapse=', '), '.\n',
+        '`analyze_spreadsheet` will continue assuming that these are not relevant, and drop these data.\n',
+        'If this is not the case, verify your dataset and, if necessary, rename the columns.\n', sep='')
+    dat <- select(dat, intersect(names(dat), all_vars))
+  }
+
+  ### clean up NAs
   dat <- dat %>%
     mutate(
       across(where(is.numeric), \(x) coalesce(x, 0)),
       across(where(is.character), \(x) coalesce(x, "NA"))
     )
   if ('sex' %in% names(dat)) dat$sex[dat$sex=='NA'] <- 'mixed'
-  
-  
-  
-}
 
-
-# check that the essential variables are there:
-usual_vars <- c('genotype', 'treatment', 'sex', 'replicate', 'dose')
-all_vars <- c("date", "time", "deaths", "dead", "censorings", "censored", "treatment",
-              "dose", "dose_unit", "genotype", "replicate", "sex")
-extra_vars <- setdiff(names(df), all_vars)
-confirmed_vars <- intersect(names(df), usual_vars)
-if (length(confirmed_vars)==0){
-  cat('You do not seem to have any of the usual variables (genotype, treatment, dose, sex, replicate).\n')
-  cat('Verify your dataset and if necessary, rename the columns.\n')
-  break
-} else {
-  cat(paste('You have', length(confirmed_vars), 'of the 5 usual explanatory variables:',
-            paste(confirmed_vars, collapse=', ')), '\n')
-}
-if (length(extra_vars)>0){
-  cat(paste('You have the additional variable(s):',
-            paste(extra_vars, collapse=', ')), '\n')
-  cat('This/these will be either renamed (*censor*) or passed on to the output dataframe.\n')
-}
-# take care of the columns specifying dose
-names(df)[names(df)=='dose_units'] <- 'dose_unit'
-if (length( grep('dose', names(df)) )>0) {
-  for (j in grep('dose', names(df)) ) {
-    # create a 'date_units' if this is included in the 'dose' column name
-    if (length(str_split(names(df)[j], '_'))>1 &
-        length(grep('dose_units', names(df)))==0){
-      df$date_units <- str_split(names(df)[j], '_')[[2]]
-    }
-    # if the 'dose' column incorporates units, rename as 'dose'
-    if (names(df)[j]!='dose' &
-        names(df)[j]!='dose_unit'){
-      names(df)[j] <- 'dose'
-    }
-  }
-} else if (length( grep('dose', names(df)) )==0) {
-  df$dose <- 'nd'
-}
-# make sure the 'censored' column is named correctly
-if (length( grep('censor', names(df)) )==1){
-  names(df)[grep('censor', names(df))] <- 'censored'
-} else if (length( grep('censor', names(df)) )==0) {
-  df$censored <- 0
+  return (dat)
 }
 
 # --------------------------------------------------------------------
@@ -305,40 +414,50 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, rec_style, cph=FALS
   metadata <- load_metadata(sour_ce, x, msheet)
   # RECONCILE ARGUMENTS, METADATA, DATA COLUMN NAMES
   rep_size  <- set_rep_size(dat, metadata, rep_size)
-  dat <- data_cleanup(dat)
-  strata_vars <- establish_strata_vars(dat)
-  
-  
-  
-  
-  
-  
-  
+  explanatory_vars <- c('genotype', 'treatment', 'sex', 'replicate', 'dose')
+  all_vars <- c('genotype', 'treatment', 'sex', 'replicate', 'dose',
+                'events', 'censored', 'dose_unit',
+                'date', 'time')
+  dat <- data_cleanup(dat, explanatory_vars, all_vars)
+  strata_vars <- intersect(names(dat), explanatory_vars)
   rec_style <- set_recording_style(rec_style, dat, metadata, rep_size, strata_vars)
 
-
-
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
   
   # ESTABLISH TIME INTERVALS
   # ========================
   cat('establishing time intervals...\n')
   format_in <- "%d.%m.%Y"
-  df$date <- as.Date(df$date, format=format_in)
-  df$time2 <- apply(df[,c('date', 'time')], 1, function(w) f(w['date'], w['time']))
-  df$time2 <- as.POSIXct(df$time2)
-  df$hour <- signif(difftime(df$time2, df$time2[1], units = "hours"), 3)
+  dat$date <- as.Date(dat$date, format=format_in)
+  dat$time2 <- apply(dat[,c('date', 'time')], 1, function(w) f(w['date'], w['time']))
+  dat$time2 <- as.POSIXct(dat$time2)
+  dat$hour <- signif(difftime(dat$time2, dat$time2[1], units = "hours"), 3)
   ### In case the dat are recorded cumulatively
   cat('establishing individual events (non-cumulative)...\n')
-  excluded_vars <- c('date','time','hour','time2','deaths','censored') # this may have to change depending on the project
-  included_vars <- names(df)[!names(df) %in% excluded_vars]
-  if (rec_style) {
-    var_combos <- unique(expand_grid(df[included_vars]))
+  excluded_vars <- c('date','time','hour','time2','events','censored') # this may have to change depending on the project
+  included_vars <- names(dat)[!names(dat) %in% excluded_vars]
+  if (rec_style == 'cumulative') {
+    var_combos <- unique(expand_grid(dat[included_vars]))
     for (row in 1:nrow(var_combos)) {
       combo <- var_combos[row, ]
-      combo_rows <- apply(df[included_vars],1,function(x) {all(x==combo)})
-      deaths_rec_style <- df[combo_rows,'deaths']
-      newdeaths <- c(0, diff(deaths_rec_style$deaths))
-      df[combo_rows,]$deaths <- newdeaths
+      combo_rows <- apply(dat[included_vars],1,function(x) {all(x==combo)})
+      events_rec_style <- dat[combo_rows,'events']
+      new_events <- c(0, diff(events_rec_style$events))
+      dat[combo_rows,]$events <- new_events
     }
   }
   
@@ -346,58 +465,68 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, rec_style, cph=FALS
   # ===================================
   cat('establishing death numbers...\n')
   cat('establishing explicit censorings...\n')
-  # remove rows without data (deaths/censored separately)
-  deaths_df<- df[ df$deaths>0, !names(df) %in% c('censored')]
-  censor_df<- df[ df$censored>0, !names(df) %in% c('deaths')]
-  # replicate rows per their number of deaths, then turn into event=1
-  deaths_df <- deaths_df[rep(1:nrow(deaths_df), deaths_df$deaths), ]
-  names(deaths_df)[names(deaths_df)=='deaths'] <- 'event'
+  # remove rows without data (events/censored separately)
+  events_dat<- dat[ dat$events>0, !names(dat) %in% c('censored')]
+  censor_dat<- dat[ dat$censored>0, !names(dat) %in% c('events')]
+  # replicate rows per their number of events, then turn into event=1
+  events_dat <- events_dat[rep(1:nrow(events_dat), events_dat$events), ]
+  names(events_dat)[names(events_dat)=='events'] <- 'events'
   # same with censorings (if there are any!)
-  if (length(censor_df$censored)>0) {
-    censor_df <- censor_df[rep(1:nrow(censor_df), censor_df$censored), ]
-    names(censor_df)[names(censor_df)=='censored'] <- 'event'
+  if (length(censor_dat$censored)>0) {
+    censor_dat <- censor_dat[rep(1:nrow(censor_dat), censor_dat$censored), ]
+    names(censor_dat)[names(censor_dat)=='censored'] <- 'events'
   }
-  deaths_df$event <- 1 # code for event=death
-  censor_df$event <- 0 # code for event=censoring
+  events_dat$event <- 1 # code for event=death
+  censor_dat$event <- 0 # code for event=censoring
   # combine
-  fin_df <- rbind(deaths_df, censor_df)
-  fin_df$maxhour <- max(fin_df$hour)
+  fin_dat <- rbind(events_dat, censor_dat)
+  fin_dat$maxhour <- max(fin_dat$hour)
   ### Include non-recorded censorship (endpoint or missed)
   cat('establishing implicit censorings...\n')
+  
+  
+  
+  
+  # problems here
+  
+  
+  
+  
+  
   # the period indicates ALL the variables (the included ones, that is)
-  surv_df <- aggregate(deaths ~ ., df[,c(included_vars, 'deaths')], sum)
+  surv_dat <- aggregate(events ~ ., dat[,c(included_vars, 'events')], sum)
   # if not all conditions have the same size
   if (is.data.frame(rep_size)) {
-    try( if (nrow(rep_size)!=nrow(surv_df)) stop("the table reporting replicate sizes in the excel file does not have the appropriate number of rows."))
-    # find common colnames for surv_df and rep_size
-    rep_cols <- intersect(names(surv_df), names(rep_size))
-    # find the order of rep_size rows to match the variables order of surv_df
-    keys <- plyr::join.keys(surv_df,rep_size,rep_cols)
+    try( if (nrow(rep_size)!=nrow(surv_dat)) stop("the table reporting replicate sizes in the excel file does not have the appropriate number of rows."))
+    # find common colnames for surv_dat and rep_size
+    rep_cols <- intersect(names(surv_dat), names(rep_size))
+    # find the order of rep_size rows to match the variables order of surv_dat
+    keys <- plyr::join.keys(surv_dat,rep_size,rep_cols)
     matches <- match(keys$y,keys$x,nomatch=(keys$n+1))
     # use the new order to get numbers of survivors per vial at termination
-    surv_df$censored <- rep_size[order(matches),]$size - surv_df$deaths
+    surv_dat$censored <- rep_size[order(matches),]$size - surv_dat$events
   # if all conditions have the same size it is much simpler:
   } else if (is.numeric(rep_size)) {
-    surv_df$censored <- rep_size - surv_df$deaths
+    surv_dat$censored <- rep_size - surv_dat$events
   }
-  for (r in 1:nrow(surv_df)) {
+  for (r in 1:nrow(surv_dat)) {
     # complete list of columns <--- this would need to be more generalised
-    newrow <- surv_df[r,!names(surv_df) %in% c('deaths','censored')]
-    newrow$date <- max(fin_df$date)
-    newrow$time <- max(fin_df$time)
+    newrow <- surv_dat[r,!names(surv_dat) %in% c('events','censored')]
+    newrow$date <- max(fin_dat$date)
+    newrow$time <- max(fin_dat$time)
     newrow$event <- 0
-    newrow$time2 <- max(fin_df$time2)
-    newrow$hour <- max(fin_df$hour)
-    newrow$maxhour <- max(fin_df$maxhour)
-    newrow <- newrow[rep(1,surv_df$censored[r]),]
-    fin_df <- rbind(fin_df, newrow)
+    newrow$time2 <- max(fin_dat$time2)
+    newrow$hour <- max(fin_dat$hour)
+    newrow$maxhour <- max(fin_dat$maxhour)
+    newrow <- newrow[rep(1,surv_dat$censored[r]),]
+    fin_dat <- rbind(fin_dat, newrow)
   }
   
   # COLUMN CLEANUP <--------- quite ad hoc!
   # ==============
   returned_vals <- c(included_vars, 'event', 'hour', 'time2')
-  fin_df <- fin_df[,returned_vals]
-  fin_df <- fin_df %>% rename(time = time2)
+  fin_dat <- fin_dat[,returned_vals]
+  fin_dat <- fin_dat %>% rename(time = time2)
   
   # BASIC SURVIVAL MODELLING
   # ========================
@@ -405,7 +534,7 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, rec_style, cph=FALS
   cat('\n----------------\n')
   if (cph) {
     cph_model <- coxph(Surv(hour, event) ~ treatment + genotype + treatment*genotype,
-                       data=fin_df)
+                       data=fin_dat)
     zphfit <- cox.zph(cph_model)
     if (zphfit$table[,3]['GLOBAL']>0.05){
       cat('\tSchoenfeld test shows PH assumption is respected\n')
@@ -423,9 +552,9 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, rec_style, cph=FALS
   # for plotting (long-rank)
   cat('\nLOG-RANK p-value\n')
   cat('\n----------------\n')
-  model <- survdiff(Surv(hour, event) ~ treatment + genotype, data=fin_df)
+  model <- survdiff(Surv(hour, event) ~ treatment + genotype, data=fin_dat)
   cat('The log-rank test gives a p-value of ', model$pvalue)
   
-  return( fin_df )
+  return( fin_dat )
 }
 
