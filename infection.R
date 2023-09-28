@@ -157,21 +157,28 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cumul, cph=FALSE) {
     # getting it from metadata
     if (exists('metadata')) {
       cumul <- metadata[metadata$Category=='cumulative','Value'][[1]]
-      t <- try(if (eval(parse(text=cumul))) { cumul <- TRUE }
-               else if (!eval(parse(text=cumul))) { cumul <- FALSE })
-      if(inherits(t, 'try-error')) { cumul <- check_cumulative(df, rep_size) }
+      # check that the input is either 'TRUE' or 'FALSE' and assign a logical value
+      t <- try(if (eval(parse(text=str_to_upper(cumul)))) {cumul <- TRUE }
+               else if (!eval(parse(text=str_to_upper(cumul)))) { cumul <- FALSE })
+      # if not, deduce `cumul` from the data
+      if(inherits(t, 'try-error')) {
+        cat('The metadata provided no valid information about whether events were recorded cumulatively.\n',
+            '`analyse_spreadsheet` will attempt to deduce this from the data.\n', sep='')
+        cumul <- check_cumulative(df, rep_size) }
+    # if metadata does not exist, deduce `cumul` from the data
     } else {
-      cat('There is no input information about whether events were recorded cumulatively.\n')
-      cat('`analyse_spreadsheet` will attempt to deduce the value.\n')
+      cat('There is no input information about whether events were recorded cumulatively.\n',
+          '`analyse_spreadsheet` will attempt to deduce this from the data.\n', sep='')
       cumul <- check_cumulative(df, rep_size)
     }
-  } else {
-    if (cumul) cat('User has specified that events were recorded cumulatively.\n')
-    else cat('User has specified that events were recorded cumulatively.\n')
   # case argument given
   } else {
-    # data does not coincide with user's declaration
-    if(!cumul == check_cumulative(df, rep_size)) {
+    # and `cumul` is ok
+    if(cumul == check_cumulative(df, rep_size)) {
+      if (cumul) cat('User has specified that events were recorded CUMULATIVELY.\n')
+      else cat('User has specified that events were NOT recorded cumulatively.\n')
+    # but if data does not coincide with user's declaration...
+    } else {
       if( cumul ) {
         cat('You have specified that events were recorded CUMULATIVELY.\n',
             'However, the data seem to have been recorded NON-cumulatively.\n',
