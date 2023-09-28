@@ -100,17 +100,10 @@ load_metadata <- function(sour_ce, x, msheet) {
       cat('You have not provided a spreadsheet name for the experiment\'s metadata,\n',
           'nor your Excel file has any of the usual names for time-to-event ',
           'metadata in the lab.\nWe will continue using default values.', sep='')
-      return (NA)
+      return (NULL)
     }
   }
   return (metadata)
-}
-
-# --------------------------------------------------------------------
-
-check_rep_size <- function(rep_size) {
-  
-  
 }
 
 # --------------------------------------------------------------------
@@ -145,7 +138,7 @@ set_rep_size <- function(data, metadata, rep_size) {
   # if not argument given:
   if (missing(rep_size)) {
     # extract it from metadata
-    if (!is.na(metadata)) {
+    if (!is.null(metadata)) {
       rep_size <- as.numeric(metadata[metadata$Category=='Replicate_size','Value'][[1]])
       cat("Replicate size information found in the metadata")
       # in case the rep_size is not the same for all stratum replicates:
