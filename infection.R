@@ -10,6 +10,7 @@ library(stringr)
 # - implementing the use of rep_size as a table
 # - remove recorded censorship from automated total !!!
 
+# --------------------------------------------------------------------
 
 f <- function(x, y) {
   # this is just to change the format of the date.
@@ -22,8 +23,93 @@ f <- function(x, y) {
   paste(d, t)
 }
 
+# --------------------------------------------------------------------
+
 # from https://stat.ethz.ch/pipermail/r-help/2011-September/289346.html:
 is.whole <- function(x) { is.numeric(x) && floor(x)==x }
+
+# --------------------------------------------------------------------
+
+check_source <- function(x) {
+  # check input is a character
+  if (is.character(x)) {
+    # check input is a path to an Excel file
+    if (file.exists(x) & startsWith(format_from_signature(filepath),'xl')) {
+      sour_ce <- 'excel'
+    } else {
+      cat("`analyse_spreadsheet` cannot use the input data.\n")
+      cat("`x` must be a suitable dataframe or a path to a suitable Excel file.\n")
+      break
+    }
+  # check input is a dataframe
+  } else if (is.data.frame(x)) {
+    sour_ce <- 'dataframe'
+  } else {
+    cat("`analyse_spreadsheet` cannot use the input data.\n")
+    cat("`x` must be a suitable dataframe or a path to a suitable Excel file.\n")
+    break
+  }
+  return(sour_ce)
+}
+
+# --------------------------------------------------------------------
+
+load_data <- function(sour_ce, x, dsheet) {
+  if (sour_ce=='excel') {
+    if (!missing(dsheet)){
+      df <- read_excel(x, sheet=dsheet)
+      cat("`analyse_spreadsheet` will extract data from sheet `", dsheet, "`.\n", sep='')
+    } else {
+      if (!is.na(match("data", str_to_lower( (excel_sheets(filepath)) )))) {
+        d <- match("data", str_to_lower(excel_sheets(filepath)))
+        df <- read_excel(x, sheet=excel_sheets(filepath)[d])
+        cat("`analyse_spreadsheet` will extract data from sheet `data` (deduced).\n")
+      } else if (!is.na(match("tidy", str_to_lower( (excel_sheets(filepath)) )))) {
+        # historically, previous template data files had the data in a 'tidy' sheet
+        d <- match("tidy", str_to_lower(excel_sheets(filepath)))
+        df <- read_excel(x, sheet=excel_sheets(filepath)[d])
+        cat("`analyse_spreadsheet` will extract data from sheet `tidy` (deduced).\n")
+      } else {
+        df <- read_excel(x)
+        message(cat('You have not provided a spreadsheet name, nor your Excel file has\n',
+                    'any of the usual names for time-to-event data in the lab.\n',
+                    'We will continue using whatever is in the first sheet.', sep=''))
+      }
+    }
+  } else if (sour_ce=='dataframe') {
+    df <- x
+    cat("`analyse_spreadsheet` will read the data from a dataframe object.\n",
+        "No checks on the data will be performed at this point.\n")
+  }
+  return (data)
+}
+
+# --------------------------------------------------------------------
+
+load_metadata <- function(sour_ce, x, msheet) {
+  if (!sour_ce=='excel') return (NA)
+  if (!missing(msheet)){
+    metadata <- read_excel(x, sheet=msheet)
+    cat("`analyse_spreadsheet` will read metadata from sheet `", msheet, "`.\n", sep='')
+  } else {
+    if (!is.na(match("metadata", str_to_lower( (excel_sheets(filepath)) )))) {
+      m <- match("metadata", str_to_lower(excel_sheets(filepath)))
+      metadata <- read_excel(x, sheet=excel_sheets(filepath)[m])
+      cat("`analyse_spreadsheet` will read metadata from sheet `metadata` (deduced).\n")
+    } else {
+      cat('You have not provided a spreadsheet name for the experiment\'s metadata,\n',
+          'nor your Excel file has any of the usual names for time-to-event ',
+          'metadata in the lab.\nWe will continue using default values.', sep='')
+      return (NA)
+    }
+  }
+  return (metadata)
+}
+# --------------------------------------------------------------------
+# --------------------------------------------------------------------
+# --------------------------------------------------------------------
+# --------------------------------------------------------------------
+# --------------------------------------------------------------------
 
 check_cumulative <- function(df, rep_size) {
   # NOT READY TO TAKE `rep_size` AS A DATAFRAME
@@ -44,67 +130,16 @@ check_cumulative <- function(df, rep_size) {
   return( cumul )
 }
 
-analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cumul, cph=FALSE) {
-  
-  # LOAD THE DATA
-  # =============
-  ### For an MS Excel file:
-  # check input is a character
-  if (is.character(x)) {
-    # check input is a path to an Excel file
-    if (file.exists(x) & startsWith(format_from_signature(filepath),'xl')) {
-      # check `sheet` is specified
-      if (!missing(dsheet)){
-        df <- read_excel(x, sheet=dsheet)
-        cat("`analyse_spreadsheet` will extract data from sheet `", dsheet, "`.\n", sep='')
-      } else {
-        if (!is.na(match("data", str_to_lower( (excel_sheets(filepath)) )))) {
-          d <- match("data", str_to_lower(excel_sheets(filepath)))
-          df <- read_excel(x, sheet=excel_sheets(filepath)[d])
-          cat("`analyse_spreadsheet` will extract data from sheet `data` (deduced).\n")
-        } else if (!is.na(match("tidy", str_to_lower( (excel_sheets(filepath)) )))) {
-          # historically, previous template data files had the data in a 'tidy' sheet
-          d <- match("tidy", str_to_lower(excel_sheets(filepath)))
-          df <- read_excel(x, sheet=excel_sheets(filepath)[d])
-          cat("`analyse_spreadsheet` will extract data from sheet `tidy` (deduced).\n")
-        } else {
-          df <- read_excel(x)
-          message(cat('You have not provided a spreadsheet name, nor your Excel file has\n',
-                      'any of the usual names for time-to-event data in the lab.\n',
-                      'We will continue using whatever is in the first sheet.', sep=''))
-          }
-        }
-      # check that the Excel file has a 'metadata' sheet (ignoring capitalisation)
-      if (!missing(msheet)){
-        metadata <- read_excel(x, sheet=msheet)
-        cat("`analyse_spreadsheet` will read metadata from sheet `", msheet, "`.\n", sep='')
-      } else {
-        if (!is.na(match("metadata", str_to_lower( (excel_sheets(filepath)) )))) {
-          m <- match("metadata", str_to_lower(excel_sheets(filepath)))
-          metadata <- read_excel(x, sheet=excel_sheets(filepath)[m])
-          cat("`analyse_spreadsheet` will read metadata from sheet `metadata` (deduced).\n")
-        } else {
-          cat('You have not provided a spreadsheet name for the experiment\'s metadata,\n',
-              'nor your Excel file has any of the usual names for time-to-event ',
-              'metadata in the lab.\nWe will continue using default values.', sep='')
-        }
-      }
-    }
-  ### For an existing R dataframe object:
-  # check input is a dataframe
-  } else if (is.data.frame(x)) {
-    df <- x
-    cat("`analyse_spreadsheet` will read the data from a dataframe object.\n",
-        "No checks on the data will be performed at this point.\n")
-  ### For any other input:
-  } else {
-    cat("`analyse_spreadsheet` cannot use the input data.\n")
-    cat("`x` must be a suitable dataframe or a path to a suitable Excel file.\n")
-    break
-  }
+# --------------------------------------------------------------------
 
+analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cumul, cph=FALSE) {
+  # LOAD THE DATA
+  sour_ce <- check_source(x)
+  data <- load_data(sour_ce, x, dsheet)
+  metadata <- load_metadata(sour_ce, x, msheet)
   # RECONCILE ARGUMENTS AND METADATA
-  # ================================
+  
+  
   ### For number of individuals per stratum replicate (`rep_size`):
   # case no argument given:
   if (missing(rep_size)) {
