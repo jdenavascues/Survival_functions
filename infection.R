@@ -156,81 +156,80 @@ set_rep_size <- function(data, metadata, rep_size) {
   rep_size <- check_rep_size(rep_size, default_rep_size)
   return (rep_size)
 }
- 
-# --------------------------------------------------------------------
-# --------------------------------------------------------------------
-# --------------------------------------------------------------------
+
 # --------------------------------------------------------------------
 
-check_cumulative <- function(df, rep_size) {
+check_rec_style <- function(data, rep_size) {
   # NOT READY TO TAKE `rep_size` AS A DATAFRAME
-  check <- df %>% group_by(genotype, treatment, replicate) %>%
+  check <- data %>% group_by(genotype, treatment, replicate) %>%
     summarise(diff=diff(deaths), .groups='keep') %>%
     summarise(cumulative_xdiff=all(diff>=0), .groups='keep')
   cumulative_compatible <- data.frame(diff = check$cumulative_xdiff)
-  check <- df %>% group_by(genotype, treatment, replicate) %>%
+  check <- data %>% group_by(genotype, treatment, replicate) %>%
     summarise(sum=sum(deaths), .groups='keep') %>%
     summarise(cumulative_xsum=all(sum>rep_size), .groups='keep')
   cumulative_compatible$sum <- check$cumulative_xsum
   cumulative_compatible$cumulative <- (cumulative_compatible$diff | cumulative_compatible$sum)
   if ( all(cumulative_compatible$cumulative) ) {
-    cumul = TRUE
+    return ('cumulative')
   } else {
-    cumul = FALSE
+    return ('new')
   }
-  return( cumul )
 }
 
 # --------------------------------------------------------------------
 
-analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cumul, cph=FALSE) {
+set_recording_style <- function(rec_style, data, metadata, rep_size) {
+  # `rec_style`: whether the events have been recorded cumulatively or 'instantaneously'
+  # if no argument given:
+  if (missing(rec_style)) {
+    # getting it from metadata
+    if (!is.null(metadata)) {
+      rec_style <- metadata[metadata$Category=='Recording_style','Value'][[1]]
+      # if not valid, deduce `rec_style` from the data
+      if(!rec_style %in% c('cumulative', 'new')) {
+        cat('The metadata provided no valid information about whether events were recorded cumulatively.\n',
+            '`analyse_spreadsheet` will attempt to deduce this from the data.\n', sep='')
+        rec_style <- check_rec_style(data, rep_size) }
+    # if metadata does not exist, deduce `rec_style` from the data
+    } else {
+      cat('There is no input information about whether events were recorded cumulatively.\n',
+          '`analyse_spreadsheet` will attempt to deduce this from the data.\n', sep='')
+      rec_style <- check_rec_style(df, rep_size)
+    }
+    # case argument given
+  } else {
+    # and `rec_style` is ok
+    if(rec_style == check_rec_style(df, rep_size)) {
+      if (rec_style) cat('User has specified that events were recorded cumulativeLY.\n')
+      else cat('User has specified that events were NOT recorded cumulatively.\n')
+      # but if data does not coincide with user's declaration...
+    } else {
+      if( rec_style ) {
+        cat('You have specified that events were recorded cumulativeLY.\n',
+            'However, the data seem to have been recorded NON-cumulatively.\n',
+            '`analyse_spreadsheet` will go ahead assuming this was an error on your part;\n',
+            '---> PLEASE CHECK YOUR DATA <---', sep='')
+      } else {
+        cat('You have specified that events were recorded NON-cumulatively.\n',
+            'However, the data seem to have been recorded cumulativeLY.\n',
+            '`analyse_spreadsheet` will go ahead assuming this was an error on your part;\n',
+            '---> PLEASE CHECK YOUR DATA <---', sep='')
+      }
+    }
+  }
+}
+
+# --------------------------------------------------------------------
+
+analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, rec_style, cph=FALSE) {
   # LOAD THE DATA
   sour_ce  <- check_source(x)
   data     <- load_data(sour_ce, x, dsheet)
   metadata <- load_metadata(sour_ce, x, msheet)
   # RECONCILE ARGUMENTS AND METADATA
   rep_size <- set_rep_size(data, metadata, rep_size)
-  ### For the type of event recording (`cumul`): all events (cumulative) or new events
-  # case no argument given
-  if (missing(cumul)) {
-    # getting it from metadata
-    if (exists('metadata')) {
-      cumul <- metadata[metadata$Category=='cumulative','Value'][[1]]
-      # check that the input is either 'TRUE' or 'FALSE' and assign a logical value
-      t <- try(if (eval(parse(text=str_to_upper(cumul)))) {cumul <- TRUE }
-               else if (!eval(parse(text=str_to_upper(cumul)))) { cumul <- FALSE })
-      # if not, deduce `cumul` from the data
-      if(inherits(t, 'try-error')) {
-        cat('The metadata provided no valid information about whether events were recorded cumulatively.\n',
-            '`analyse_spreadsheet` will attempt to deduce this from the data.\n', sep='')
-        cumul <- check_cumulative(df, rep_size) }
-    # if metadata does not exist, deduce `cumul` from the data
-    } else {
-      cat('There is no input information about whether events were recorded cumulatively.\n',
-          '`analyse_spreadsheet` will attempt to deduce this from the data.\n', sep='')
-      cumul <- check_cumulative(df, rep_size)
-    }
-  # case argument given
-  } else {
-    # and `cumul` is ok
-    if(cumul == check_cumulative(df, rep_size)) {
-      if (cumul) cat('User has specified that events were recorded CUMULATIVELY.\n')
-      else cat('User has specified that events were NOT recorded cumulatively.\n')
-    # but if data does not coincide with user's declaration...
-    } else {
-      if( cumul ) {
-        cat('You have specified that events were recorded CUMULATIVELY.\n',
-            'However, the data seem to have been recorded NON-cumulatively.\n',
-            '`analyse_spreadsheet` will go ahead assuming this was an error on your part;\n',
-            '---> PLEASE CHECK YOUR DATA <---', sep='')
-      } else {
-        cat('You have specified that events were recorded NON-cumulatively.\n',
-            'However, the data seem to have been recorded CUMULATIVELY.\n',
-            '`analyse_spreadsheet` will go ahead assuming this was an error on your part;\n',
-            '---> PLEASE CHECK YOUR DATA <---', sep='')
-      }
-    }
-  }
+  rec_style <- set_recording_style(rec_style, data, metadata, rep_size)
 
   # STANDARDISE COLUMN NAMES
   # ========================
@@ -303,13 +302,13 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cumul, cph=FALSE) {
   cat('establishing individual events (non-cumulative)...\n')
   excluded_vars <- c('date','time','hour','time2','deaths','censored') # this may have to change depending on the project
   included_vars <- names(df)[!names(df) %in% excluded_vars]
-  if (cumul) {
+  if (rec_style) {
     var_combos <- unique(expand_grid(df[included_vars]))
     for (row in 1:nrow(var_combos)) {
       combo <- var_combos[row, ]
       combo_rows <- apply(df[included_vars],1,function(x) {all(x==combo)})
-      deaths_cumul <- df[combo_rows,'deaths']
-      newdeaths <- c(0, diff(deaths_cumul$deaths))
+      deaths_rec_style <- df[combo_rows,'deaths']
+      newdeaths <- c(0, diff(deaths_rec_style$deaths))
       df[combo_rows,]$deaths <- newdeaths
     }
   }
