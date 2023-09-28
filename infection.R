@@ -57,12 +57,12 @@ check_source <- function(x) {
 load_data <- function(sour_ce, x, dsheet) {
   if (sour_ce=='excel') {
     if (!missing(dsheet)){
-      df <- read_excel(x, sheet=dsheet)
+      dat <- read_excel(x, sheet=dsheet)
       cat("`analyse_spreadsheet` will extract data from sheet `", dsheet, "`.\n", sep='')
     } else {
       if (!is.na(match("data", str_to_lower( (excel_sheets(filepath)) )))) {
         d <- match("data", str_to_lower(excel_sheets(filepath)))
-        df <- read_excel(x, sheet=excel_sheets(filepath)[d])
+        dat <- read_excel(x, sheet=excel_sheets(filepath)[d])
         cat("`analyse_spreadsheet` will extract data from sheet `data` (deduced).\n")
       } else if (!is.na(match("tidy", str_to_lower( (excel_sheets(filepath)) )))) {
         # historically, previous template data files had the data in a 'tidy' sheet
@@ -70,18 +70,19 @@ load_data <- function(sour_ce, x, dsheet) {
         df <- read_excel(x, sheet=excel_sheets(filepath)[d])
         cat("`analyse_spreadsheet` will extract data from sheet `tidy` (deduced).\n")
       } else {
-        df <- read_excel(x)
+        dat <- read_excel(x)
         message(cat('You have not provided a spreadsheet name, nor your Excel file has\n',
                     'any of the usual names for time-to-event data in the lab.\n',
                     'We will continue using whatever is in the first sheet.', sep=''))
       }
     }
   } else if (sour_ce=='dataframe') {
-    df <- x
+    dat <- x
     cat("`analyse_spreadsheet` will read the data from a dataframe object.\n",
         "No checks on the data will be performed at this point.\n")
   }
-  return (data)
+  names(dat) <- str_to_lower(names(dat))
+  return (dat)
 }
 
 # --------------------------------------------------------------------
@@ -132,7 +133,7 @@ check_rep_size <- function(rep_size, default_rep_size) {
 
 # --------------------------------------------------------------------
 
-set_rep_size <- function(data, metadata, rep_size) {
+set_rep_size <- function(dat, metadata, rep_size) {
   # `rep_size`: number of individuals per replicate per stratum
   default_rep_size <- 20
   # if not argument given:
@@ -159,27 +160,42 @@ set_rep_size <- function(data, metadata, rep_size) {
 
 # --------------------------------------------------------------------
 
-check_rec_style <- function(data, rep_size) {
+check_rec_style <- function(dat, rep_size, strata_vars) {
+  # this is a compatibility test - not a guarantee!
   # NOT READY TO TAKE `rep_size` AS A DATAFRAME
-  check <- data %>% group_by(genotype, treatment, replicate) %>%
-    summarise(diff=diff(deaths), .groups='keep') %>%
-    summarise(cumulative_xdiff=all(diff>=0), .groups='keep')
+  # check, for all strata, which replicates are compatible with 'cumulative' recording
+  # (i.e. show constant or ever-increasing event records)
+  check <- dat %>%
+    reframe(diff=diff(deaths), .by=all_of(strata_vars)) %>%
+    reframe(cumulative_xdiff=all(diff>=0),  .by=all_of(strata_vars))
   cumulative_compatible <- data.frame(diff = check$cumulative_xdiff)
-  check <- data %>% group_by(genotype, treatment, replicate) %>%
-    summarise(sum=sum(deaths), .groups='keep') %>%
-    summarise(cumulative_xsum=all(sum>rep_size), .groups='keep')
+  # check, for all strata, that total events are compatible with 'cumulative' recording
+  # (i.e. sum of all events "expressed" is not larger than rep_size)
+  check <- dat %>%
+    summarise(sum=sum(deaths), .by=all_of(strata_vars)) %>%
+    summarise(cumulative_xsum=all(sum>rep_size), .by=all_of(strata_vars))
   cumulative_compatible$sum <- check$cumulative_xsum
+  # if all strata replicates have records that are always increasing or
+  # that add up to more than rep_size, it could be that recording is cumulative
   cumulative_compatible$cumulative <- (cumulative_compatible$diff | cumulative_compatible$sum)
   if ( all(cumulative_compatible$cumulative) ) {
+    cat('`analyze_spreadsheet` finds evidence of cumulative ',
+        'recording in every stratum replicate.\n',
+        'It will be assumed that "cumulative" events were recorded ',
+        'at each observation.\n', sep='')
     return ('cumulative')
   } else {
+    cat('`analyze_spreadsheet` does not find evidence of cumulative ',
+        'recording in every stratum replicate.\n',
+        'It will be assumed that only "new" events were recorded ',
+        'at each observation.\n', sep='')
     return ('new')
   }
 }
 
 # --------------------------------------------------------------------
 
-set_recording_style <- function(rec_style, data, metadata, rep_size) {
+set_recording_style <- function(rec_style, dat, metadata, rep_size, strata_vars) {
   # `rec_style`: whether the events have been recorded cumulatively or 'instantaneously'
   # if no argument given:
   if (missing(rec_style)) {
@@ -190,20 +206,20 @@ set_recording_style <- function(rec_style, data, metadata, rep_size) {
       if(!rec_style %in% c('cumulative', 'new')) {
         cat('The metadata provided no valid information about whether events were recorded cumulatively.\n',
             '`analyse_spreadsheet` will attempt to deduce this from the data.\n', sep='')
-        rec_style <- check_rec_style(data, rep_size) }
+        rec_style <- check_rec_style(dat, rep_size, strata_vars) }
     # if metadata does not exist, deduce `rec_style` from the data
     } else {
       cat('There is no input information about whether events were recorded cumulatively.\n',
           '`analyse_spreadsheet` will attempt to deduce this from the data.\n', sep='')
-      rec_style <- check_rec_style(df, rep_size)
+      rec_style <- check_rec_style(dat, rep_size, strata_vars)
     }
     # case argument given
   } else {
     # and `rec_style` is ok
-    if(rec_style == check_rec_style(df, rep_size)) {
+    if(rec_style == check_rec_style(dat, rep_size, strata_vars)) {
       if (rec_style) cat('User has specified that events were recorded cumulativeLY.\n')
       else cat('User has specified that events were NOT recorded cumulatively.\n')
-      # but if data does not coincide with user's declaration...
+      # but if data do not coincide with user's declaration...
     } else {
       if( rec_style ) {
         cat('You have specified that events were recorded cumulativeLY.\n',
@@ -222,73 +238,86 @@ set_recording_style <- function(rec_style, data, metadata, rep_size) {
 
 # --------------------------------------------------------------------
 
-analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, rec_style, cph=FALSE) {
-  # LOAD THE DATA
-  sour_ce  <- check_source(x)
-  data     <- load_data(sour_ce, x, dsheet)
-  metadata <- load_metadata(sour_ce, x, msheet)
-  # RECONCILE ARGUMENTS AND METADATA
-  rep_size <- set_rep_size(data, metadata, rep_size)
-  rec_style <- set_recording_style(rec_style, data, metadata, rep_size)
-
-  # STANDARDISE COLUMN NAMES
-  # ========================
-  # make lowercase
-  names(df) <- str_to_lower(names(df))
-  # check that the essential variables are there:
-  usual_vars <- c('genotype', 'treatment', 'sex', 'replicate', 'dose')
-  all_vars <- c("date", "time", "deaths", "dead", "censorings", "censored", "treatment",
-                "dose", "dose_unit", "genotype", "replicate", "sex")
-  extra_vars <- setdiff(names(df), all_vars)
-  confirmed_vars <- intersect(names(df), usual_vars)
-  if (length(confirmed_vars)==0){
-    cat('You do not seem to have any of the usual variables (genotype, treatment, dose, sex, replicate).\n')
-    cat('Verify your dataset and if necessary, rename the columns.\n')
-    break
-  } else {
-    cat(paste('You have', length(confirmed_vars), 'of the 5 usual explanatory variables:',
-              paste(confirmed_vars, collapse=', ')), '\n')
-  }
-  if (length(extra_vars)>0){
-    cat(paste('You have the additional variable(s):',
-              paste(extra_vars, collapse=', ')), '\n')
-    cat('This/these will be either renamed (*censor*) or passed on to the output dataframe.\n')
-  }
-  # take care of the columns specifying dose
-  names(df)[names(df)=='dose_units'] <- 'dose_unit'
-  if (length( grep('dose', names(df)) )>0) {
-    for (j in grep('dose', names(df)) ) {
-      # create a 'date_units' if this is included in the 'dose' column name
-      if (length(str_split(names(df)[j], '_'))>1 &
-          length(grep('dose_units', names(df)))==0){
-        df$date_units <- str_split(names(df)[j], '_')[[2]]
-      }
-      # if the 'dose' column incorporates units, rename as 'dose'
-      if (names(df)[j]!='dose' &
-          names(df)[j]!='dose_unit'){
-        names(df)[j] <- 'dose'
-      }
-    }
-  } else if (length( grep('dose', names(df)) )==0) {
-    df$dose <- 'nd'
-  }
-  # make sure the 'censored' column is named correctly
-  if (length( grep('censor', names(df)) )==1){
-    names(df)[grep('censor', names(df))] <- 'censored'
-  } else if (length( grep('censor', names(df)) )==0) {
-    df$censored <- 0
-  }
-
-  # CLEAN UP NAs
-  # ============
-  df <- df %>%
+data_cleanup <- function(dat) {
+  # clean up NAs
+  dat <- dat %>%
     mutate(
       across(where(is.numeric), \(x) coalesce(x, 0)),
       across(where(is.character), \(x) coalesce(x, "NA"))
-      )
-  if ('sex' %in% names(df)) {
-    df$sex[df$sex=='NA'] <- 'mixed'
+    )
+  if ('sex' %in% names(dat)) dat$sex[dat$sex=='NA'] <- 'mixed'
+  
+  
+  
+}
+
+
+# check that the essential variables are there:
+usual_vars <- c('genotype', 'treatment', 'sex', 'replicate', 'dose')
+all_vars <- c("date", "time", "deaths", "dead", "censorings", "censored", "treatment",
+              "dose", "dose_unit", "genotype", "replicate", "sex")
+extra_vars <- setdiff(names(df), all_vars)
+confirmed_vars <- intersect(names(df), usual_vars)
+if (length(confirmed_vars)==0){
+  cat('You do not seem to have any of the usual variables (genotype, treatment, dose, sex, replicate).\n')
+  cat('Verify your dataset and if necessary, rename the columns.\n')
+  break
+} else {
+  cat(paste('You have', length(confirmed_vars), 'of the 5 usual explanatory variables:',
+            paste(confirmed_vars, collapse=', ')), '\n')
+}
+if (length(extra_vars)>0){
+  cat(paste('You have the additional variable(s):',
+            paste(extra_vars, collapse=', ')), '\n')
+  cat('This/these will be either renamed (*censor*) or passed on to the output dataframe.\n')
+}
+# take care of the columns specifying dose
+names(df)[names(df)=='dose_units'] <- 'dose_unit'
+if (length( grep('dose', names(df)) )>0) {
+  for (j in grep('dose', names(df)) ) {
+    # create a 'date_units' if this is included in the 'dose' column name
+    if (length(str_split(names(df)[j], '_'))>1 &
+        length(grep('dose_units', names(df)))==0){
+      df$date_units <- str_split(names(df)[j], '_')[[2]]
+    }
+    # if the 'dose' column incorporates units, rename as 'dose'
+    if (names(df)[j]!='dose' &
+        names(df)[j]!='dose_unit'){
+      names(df)[j] <- 'dose'
+    }
   }
+} else if (length( grep('dose', names(df)) )==0) {
+  df$dose <- 'nd'
+}
+# make sure the 'censored' column is named correctly
+if (length( grep('censor', names(df)) )==1){
+  names(df)[grep('censor', names(df))] <- 'censored'
+} else if (length( grep('censor', names(df)) )==0) {
+  df$censored <- 0
+}
+
+# --------------------------------------------------------------------
+
+analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, rec_style, cph=FALSE) {
+  # LOAD THE DATA
+  sour_ce <- check_source(x)
+  dat <- load_data(sour_ce, x, dsheet)
+  metadata <- load_metadata(sour_ce, x, msheet)
+  # RECONCILE ARGUMENTS, METADATA, DATA COLUMN NAMES
+  rep_size  <- set_rep_size(dat, metadata, rep_size)
+  dat <- data_cleanup(dat)
+  strata_vars <- establish_strata_vars(dat)
+  
+  
+  
+  
+  
+  
+  
+  rec_style <- set_recording_style(rec_style, dat, metadata, rep_size, strata_vars)
+
+
+
   
   # ESTABLISH TIME INTERVALS
   # ========================
@@ -298,7 +327,7 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, rec_style, cph=FALS
   df$time2 <- apply(df[,c('date', 'time')], 1, function(w) f(w['date'], w['time']))
   df$time2 <- as.POSIXct(df$time2)
   df$hour <- signif(difftime(df$time2, df$time2[1], units = "hours"), 3)
-  ### In case the data are recorded cumulatively
+  ### In case the dat are recorded cumulatively
   cat('establishing individual events (non-cumulative)...\n')
   excluded_vars <- c('date','time','hour','time2','deaths','censored') # this may have to change depending on the project
   included_vars <- names(df)[!names(df) %in% excluded_vars]
