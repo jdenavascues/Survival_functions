@@ -105,7 +105,65 @@ load_metadata <- function(sour_ce, x, msheet) {
   }
   return (metadata)
 }
+
 # --------------------------------------------------------------------
+
+check_rep_size <- function(rep_size) {
+  
+  
+}
+
+# --------------------------------------------------------------------
+
+check_rep_size <- function(rep_size, default_rep_size) {
+  # for the future case of having a table:
+  if (is.data.frame(rep_size)) {
+    cat('Sizes of stratum replicates are not equal.\n',
+        '`analyse_spreadsheet` is not ready yet to process this data.\n',
+        'A default value of rep_size = ', default_rep_size, ' will be used.\n', sep='')
+    return (default_rep_size)
+  # for the usual case: a single positive whole number
+  } else if (is.whole(rep_size) && rep_size>0) {
+    return (rep_size)
+  # for negative/non-whole numbers:
+  } else if (is.numeric(rep_size) && (rep_size<0 || !is.whole(rep_size))) {
+    cat('You have not provided a whole, positive number for the size of stratum replicates.\n',
+        'The value (', rep_size, ') will be taken as ', round(abs(rep_size)), '.\n', sep='')
+    return (rep_size <- round(abs(rep_size)))
+  } else {
+    cat('You have not provided a valid value for the size of stratum replicates.\n',
+        'A default value of rep_size = ', default_rep_size, ' will be used.\n', sep='')
+    return (default_rep_size)
+  }
+}
+
+# --------------------------------------------------------------------
+
+set_rep_size <- function(data, metadata, rep_size) {
+  # `rep_size`: number of individuals per replicate per stratum
+  default_rep_size <- 20
+  # if not argument given:
+  if (missing(rep_size)) {
+    # extract it from metadata
+    if (!is.na(metadata)) {
+      rep_size <- as.numeric(metadata[metadata$Category=='Replicate_size','Value'][[1]])
+      cat("Replicate size information found in the metadata")
+      # in case the rep_size is not the same for all stratum replicates:
+      if (rep_size=='table'){
+        rep_size <- read_excel(x, sheet='rep_size')
+        names(rep_size) <- str_to_lower( names(rep_size) )
+      }
+    } else {
+      cat("No replicate size argument given and no information found in the metadata,",
+          'or metadata is not provided.',
+          'A default value of rep_size = ', default_rep_size, ' will be used.\n', sep='')
+      return (default_rep_size)
+    }
+  }
+  rep_size <- check_rep_size(rep_size, default_rep_size)
+  return (rep_size)
+}
+ 
 # --------------------------------------------------------------------
 # --------------------------------------------------------------------
 # --------------------------------------------------------------------
@@ -134,58 +192,11 @@ check_cumulative <- function(df, rep_size) {
 
 analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cumul, cph=FALSE) {
   # LOAD THE DATA
-  sour_ce <- check_source(x)
-  data <- load_data(sour_ce, x, dsheet)
+  sour_ce  <- check_source(x)
+  data     <- load_data(sour_ce, x, dsheet)
   metadata <- load_metadata(sour_ce, x, msheet)
   # RECONCILE ARGUMENTS AND METADATA
-  
-  
-  ### For number of individuals per stratum replicate (`rep_size`):
-  # case no argument given:
-  if (missing(rep_size)) {
-    # extracting it from metadata
-    if (exists('metadata')) {
-      rep_size <- as.numeric(metadata[metadata$Category=='Replicate_size','Value'][[1]])
-      cat("The metadata reads that there are ", rep_size, " experimental individuals in all replicates for all strata.\n", sep='')
-      # in case the rep_size is not the same for all stratum replicates:
-      if (rep_size=='table'){
-        rep_size <- read_excel(x, sheet='rep_size')
-        names(rep_size) <- str_to_lower( names(rep_size) )
-        cat('Sizes of stratum replicates are not equal.\n',
-            '`analyse_spreadsheet` is not ready yet to process this data.\n',
-            'A default value of rep_size=20 will be used.\n', sep='')
-        rep_size <- 20
-      } else {
-        test <- try( rep_size%%1 == 0 )
-        # if it is NA or N.A.N.
-        if( inherits(test, 'try-error') ) {
-          cat('The metadata does not contain a valid value for the size of stratum replicates.\n',
-              test[1], '\n',
-              'A default value of rep_size=20 will be used.\n', sep='')
-          rep_size <- 20
-        # if it is not a whole number
-        } else if( !test ) {
-          cat('You have not provided a whole number for the size of stratum replicates.\n',
-              'The value (', rep_size, ') will be rounded to (', round(rep_size), ').\n', sep='')
-          rep_size <- round(rep_size)
-        }
-      }
-    }
-  # case argument given: check if value is appropriate
-  } else {
-    test <- try( rep_size%%1 == 0 )
-    # if it is not a number
-    if( inherits(test, 'try-error') ) {
-      cat('You have not provided a valid value for the size of stratum replicates.\n')
-      test[1]
-    # if it is not a whole number
-    } else if( !test ) {
-      cat('You have not provided a whole number for the size of stratum replicates.\n',
-          'The value (', rep_size, ') will be rounded to (', round(rep_size), ').\n', sep=='')
-      rep_size <- round(rep_size)
-    }
-  }
-  
+  rep_size <- set_rep_size(data, metadata, rep_size)
   ### For the type of event recording (`cumul`): all events (cumulative) or new events
   # case no argument given
   if (missing(cumul)) {
