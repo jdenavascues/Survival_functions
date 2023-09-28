@@ -100,7 +100,8 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cumul, cph=FALSE) {
   } else {
     cat("`analyse_spreadsheet` cannot use the input data.\n")
     cat("`x` must be a suitable dataframe or a path to a suitable Excel file.\n")
-    break }
+    break
+  }
 
   # RECONCILE ARGUMENTS AND METADATA
   # ================================
