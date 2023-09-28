@@ -184,6 +184,7 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, cumul, cph=FALSE) {
           '`analyse_spreadsheet` will go ahead assuming this was an error on your part;\n',
           '---> PLEASE CHECK YOUR DATA <---', sep='')
       }
+    }
   }
 
   # STANDARDISE COLUMN NAMES
