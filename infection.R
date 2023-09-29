@@ -8,27 +8,9 @@ library(stringr)
 ### PENDING:
 # - catch naming/missing data errors when checking column names
 # - implementing the use of rep_size as a table
+#   - cleanup column names as in data sheet, so then they coincide with the aggregate of events
 # - remove recorded censorship from automated total !!!
 
-# --------------------------------------------------------------------
-
-f <- function(x, y) {
-  # this is just to change the format of the date.
-  fout <- "%Y-%m-%d"
-  # get the date as a string...
-  d <- format(x, format=fout)
-  # get the time as string, separate from the old date...
-  t <- strsplit(as.character(y), split=' ')[[1]][[2]]
-  # paste together in standard format...
-  paste(d, t)
-}
-
-# --------------------------------------------------------------------
-
-# from https://stat.ethz.ch/pipermail/r-help/2011-September/289346.html:
-is.whole <- function(x) { is.numeric(x) && floor(x)==x }
-
-# --------------------------------------------------------------------
 
 check_source <- function(x) {
   # check input is a character
@@ -37,17 +19,21 @@ check_source <- function(x) {
     if (file.exists(x) & startsWith(format_from_signature(filepath),'xl')) {
       sour_ce <- 'excel'
     } else {
-      cat("`analyse_spreadsheet` cannot use the input data.\n")
-      cat("`x` must be a suitable dataframe or a path to a suitable Excel file.\n")
-      break
+      stop(
+        cat('---\n', '`analyse_spreadsheet` cannot use the input data.\n',
+            '`x` must be a suitable dataframe or a path to a suitable Excel file.\n',
+            sep='')
+      )
     }
   # check input is a dataframe
   } else if (is.data.frame(x)) {
     sour_ce <- 'dataframe'
   } else {
-    cat("`analyse_spreadsheet` cannot use the input data.\n")
-    cat("`x` must be a suitable dataframe or a path to a suitable Excel file.\n")
-    break
+    stop(
+      cat('---\n', '`analyse_spreadsheet` cannot use the input data.\n',
+          "`x` must be a suitable dataframe or a path to a suitable Excel file.\n",
+          sep='')
+    )
   }
   return(sour_ce)
 }
@@ -55,6 +41,7 @@ check_source <- function(x) {
 # --------------------------------------------------------------------
 
 load_data <- function(sour_ce, x, dsheet) {
+  cat('---\n')
   if (sour_ce=='excel') {
     if (!missing(dsheet)){
       dat <- read_excel(x, sheet=dsheet)
@@ -88,6 +75,7 @@ load_data <- function(sour_ce, x, dsheet) {
 # --------------------------------------------------------------------
 
 load_metadata <- function(sour_ce, x, msheet) {
+  cat('---\n')
   if (!sour_ce=='excel') return (NA)
   if (!missing(msheet)){
     metadata <- read_excel(x, sheet=msheet)
@@ -106,6 +94,11 @@ load_metadata <- function(sour_ce, x, msheet) {
   }
   return (metadata)
 }
+
+# --------------------------------------------------------------------
+
+# from https://stat.ethz.ch/pipermail/r-help/2011-September/289346.html:
+is.whole <- function(x) { is.numeric(x) && floor(x)==x }
 
 # --------------------------------------------------------------------
 
@@ -134,6 +127,7 @@ check_rep_size <- function(rep_size, default_rep_size) {
 # --------------------------------------------------------------------
 
 set_rep_size <- function(dat, metadata, rep_size) {
+  cat('---\n')
   # `rep_size`: number of individuals per replicate per stratum
   default_rep_size <- 20
   # if not argument given:
@@ -195,7 +189,8 @@ check_rec_style <- function(dat, rep_size, strata_vars) {
 
 # --------------------------------------------------------------------
 
-set_recording_style <- function(rec_style, dat, metadata, rep_size, strata_vars) {
+set_recording_style <- function(dat, metadata, rep_size, strata_vars, rec_style) {
+  cat('---\n')
   # `rec_style`: whether the events have been recorded cumulatively or 'instantaneously'
   # if no argument given:
   if (missing(rec_style)) {
@@ -252,6 +247,7 @@ set_recording_style <- function(rec_style, dat, metadata, rep_size, strata_vars)
 # --------------------------------------------------------------------
 
 data_cleanup <- function(dat, explanatory_vars, all_vars) {
+  cat('---\n')
   ### column name cleanup
   # identify columns with date data
   date_match <- grep("date|^day", names(dat))
@@ -407,49 +403,45 @@ data_cleanup <- function(dat, explanatory_vars, all_vars) {
 
 # --------------------------------------------------------------------
 
-analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, rec_style, cph=FALSE) {
-  # LOAD THE DATA
-  sour_ce <- check_source(x)
-  dat <- load_data(sour_ce, x, dsheet)
-  metadata <- load_metadata(sour_ce, x, msheet)
-  # RECONCILE ARGUMENTS, METADATA, DATA COLUMN NAMES
-  rep_size  <- set_rep_size(dat, metadata, rep_size)
-  explanatory_vars <- c('genotype', 'treatment', 'sex', 'replicate', 'dose')
-  all_vars <- c('genotype', 'treatment', 'sex', 'replicate', 'dose',
-                'events', 'censored', 'dose_unit',
-                'date', 'time')
-  dat <- data_cleanup(dat, explanatory_vars, all_vars)
-  strata_vars <- intersect(names(dat), explanatory_vars)
-  rec_style <- set_recording_style(rec_style, dat, metadata, rep_size, strata_vars)
+f <- function(x, y) {
+  # this is just to change the format of the date.
+  fout <- "%Y-%m-%d"
+  # get the date as a string...
+  d <- format(x, format=fout)
+  # get the time as string, separate from the old date...
+  t <- strsplit(as.character(y), split=' ')[[1]][[2]]
+  # paste together in standard format...
+  paste(d, t)
+}
 
+# --------------------------------------------------------------------
+
+find_time_intervals <- function(dat, explanatory_vars, rec_style, time_unit) {
+  cat('---\n', 'Establishing time-to-event intervals...\n', sep='')
   
+  # standardise time_unit name (case, plural, valid options)
+  time_unit <- str_to_lower(time_unit)
+  if (!time_unit=='auto' & !endsWith(time_unit, 's')) time_unit <- paste0(time_unit, 's')
+  time_unit_list <- c("seconds", "secs", "minutes", "mins",
+                      "auto", "hours", "days", "weeks") # options for `difftime`
+  if (!time_unit %in% time_unit_list) {
+    cat('You have not specified a valid time unit for expressing time-to-event intervals.\n',
+        '`analyze_spreadsheet` will pick a time unit automatically.\n', sep='')
+    time_unit <- 'auto'
+  }
+  if (time_unit=='seconds') time_unit <- 'secs'
+  if (time_unit=='minutes') time_unit <- 'mins'
   
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  # ESTABLISH TIME INTERVALS
-  # ========================
-  cat('establishing time intervals...\n')
+  # standardise time format and obtain interval
   format_in <- "%d.%m.%Y"
   dat$date <- as.Date(dat$date, format=format_in)
   dat$time2 <- apply(dat[,c('date', 'time')], 1, function(w) f(w['date'], w['time']))
   dat$time2 <- as.POSIXct(dat$time2)
-  dat$hour <- signif(difftime(dat$time2, dat$time2[1], units = "hours"), 3)
-  ### In case the dat are recorded cumulatively
-  cat('establishing individual events (non-cumulative)...\n')
-  excluded_vars <- c('date','time','hour','time2','events','censored') # this may have to change depending on the project
-  included_vars <- names(dat)[!names(dat) %in% excluded_vars]
+  dat$time_to_event <- signif(difftime(dat$time2, dat$time2[1], units = time_unit), 3)
+  
+  # turn cumulative events into new ones-only
+  cat('Establishing individual events (non-cumulative)...\n')
+  included_vars <- intersect(names(dat), explanatory_vars)
   if (rec_style == 'cumulative') {
     var_combos <- unique(expand_grid(dat[included_vars]))
     for (row in 1:nrow(var_combos)) {
@@ -460,88 +452,90 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, rec_style, cph=FALS
       dat[combo_rows,]$events <- new_events
     }
   }
-  
-  # ESTABLISH NUMBER OF RECORDED EVENTS
-  # ===================================
-  cat('establishing death numbers...\n')
-  cat('establishing explicit censorings...\n')
+  return (dat)
+}
+
+# --------------------------------------------------------------------
+
+rowtime_to_rowevent <- function(dat) {
+  cat('---\n', 'Converting data from time-based to event-based...\n', sep='')
   # remove rows without data (events/censored separately)
   events_dat<- dat[ dat$events>0, !names(dat) %in% c('censored')]
   censor_dat<- dat[ dat$censored>0, !names(dat) %in% c('events')]
   # replicate rows per their number of events, then turn into event=1
   events_dat <- events_dat[rep(1:nrow(events_dat), events_dat$events), ]
-  names(events_dat)[names(events_dat)=='events'] <- 'events'
-  # same with censorings (if there are any!)
-  if (length(censor_dat$censored)>0) {
+  # same with explicit censorings (if there are any!)
+  if (nrow(censor_dat)>0) {
     censor_dat <- censor_dat[rep(1:nrow(censor_dat), censor_dat$censored), ]
     names(censor_dat)[names(censor_dat)=='censored'] <- 'events'
   }
   events_dat$event <- 1 # code for event=death
   censor_dat$event <- 0 # code for event=censoring
   # combine
-  fin_dat <- rbind(events_dat, censor_dat)
-  fin_dat$maxhour <- max(fin_dat$hour)
-  ### Include non-recorded censorship (endpoint or missed)
-  cat('establishing implicit censorings...\n')
-  
-  
-  
-  
-  # problems here
-  
-  
-  
-  
-  
-  # the period indicates ALL the variables (the included ones, that is)
-  surv_dat <- aggregate(events ~ ., dat[,c(included_vars, 'events')], sum)
+  dat <- rbind(events_dat, censor_dat)
+  keeper_cols <- c("treatment", "dose", "dose_unit", "genotype", "sex",
+                   "replicate", "time_to_event", "event")
+  dat <- select(dat, all_of( intersect(keeper_cols, names(dat)) ))
+  return (dat)
+}
+
+# --------------------------------------------------------------------
+
+implicit_censoring <- function(dat, explanatory_vars) {
+  cat('---\n', 'Adding implicit (endpoint) or missed censoring events...\n', sep='')
+  # endpoint time for implicit censoring
+  maxtime <- max(dat$time_to_event)
+  # find out total numbers of 'accounted for' individuals
+  included_vars <- intersect(names(dat), explanatory_vars)
+  surv_dat <- aggregate(event ~ ., dat[,c(included_vars, 'event')], sum) # period indicates ALL variables
+  # calculate remainder of individuals in each replicate per stratum 
   # if not all conditions have the same size
   if (is.data.frame(rep_size)) {
-    try( if (nrow(rep_size)!=nrow(surv_dat)) stop("the table reporting replicate sizes in the excel file does not have the appropriate number of rows."))
+    try( if (nrow(rep_size)!=nrow(surv_dat)) {
+      stop("the table reporting replicate sizes in the excel file does not have the appropriate number of rows.")
+      }
+    )
     # find common colnames for surv_dat and rep_size
     rep_cols <- intersect(names(surv_dat), names(rep_size))
     # find the order of rep_size rows to match the variables order of surv_dat
-    keys <- plyr::join.keys(surv_dat,rep_size,rep_cols)
-    matches <- match(keys$y,keys$x,nomatch=(keys$n+1))
+    keys <- plyr::join.keys(surv_dat, rep_size, rep_cols)
+    matches <- match(keys$y, keys$x, nomatch=(keys$n+1))
     # use the new order to get numbers of survivors per vial at termination
-    surv_dat$censored <- rep_size[order(matches),]$size - surv_dat$events
-  # if all conditions have the same size it is much simpler:
+    surv_dat$censored <- rep_size[order(matches),]$size - surv_dat$event
+  # if all conditions do have the same size:
   } else if (is.numeric(rep_size)) {
-    surv_dat$censored <- rep_size - surv_dat$events
+    surv_dat$censored <- rep_size - surv_dat$event
   }
+  # create data rows per missed or endpoint censoring
   for (r in 1:nrow(surv_dat)) {
     # complete list of columns <--- this would need to be more generalised
-    newrow <- surv_dat[r,!names(surv_dat) %in% c('events','censored')]
-    newrow$date <- max(fin_dat$date)
-    newrow$time <- max(fin_dat$time)
+    newrow <- surv_dat[r,included_vars]
+    newrow$dose_unit <- unique(dat$dose_unit)[[1]] # just in case - to be generalised
     newrow$event <- 0
-    newrow$time2 <- max(fin_dat$time2)
-    newrow$hour <- max(fin_dat$hour)
-    newrow$maxhour <- max(fin_dat$maxhour)
+    newrow$time_to_event <- maxtime
     newrow <- newrow[rep(1,surv_dat$censored[r]),]
-    fin_dat <- rbind(fin_dat, newrow)
+    dat <- rbind(dat, newrow)
   }
-  
-  # COLUMN CLEANUP <--------- quite ad hoc!
-  # ==============
-  returned_vals <- c(included_vars, 'event', 'hour', 'time2')
-  fin_dat <- fin_dat[,returned_vals]
-  fin_dat <- fin_dat %>% rename(time = time2)
-  
-  # BASIC SURVIVAL MODELLING
-  # ========================
-  cat('\nCox PH MODELLING\n')
-  cat('\n----------------\n')
+  return (dat)
+}
+
+# --------------------------------------------------------------------
+
+basic_PH_test <- function(dat, cph, expanatory_vars) {
+  cat('---\n', "Quick'n'dirty evaluation of Proportional Hazards in the data...\n", sep='')
   if (cph) {
-    cph_model <- coxph(Surv(hour, event) ~ treatment + genotype + treatment*genotype,
-                       data=fin_dat)
+    experiment_vars <- intersect(names(dat), explanatory_vars)
+    experiment_vars <- experiment_vars[!experiment_vars=='replicate']
+    fm <- formula(paste0('Surv(time_to_event, event) ~ ',
+                         paste(experiment_vars, collapse=' + ')))
+    cph_model <- coxph(fm, data=dat)
     zphfit <- cox.zph(cph_model)
     if (zphfit$table[,3]['GLOBAL']>0.05){
       cat('\tSchoenfeld test shows PH assumption is respected\n')
-      cat('(null hypothesis=it is not)):\n')
+      cat('\t(null hypothesis=it is not)):\n')
       ggcoxzph(zphfit)
-      cat('P-value: ', cox.zph(cph_model)$table[,3], '\n')
-      cat(paste("\nlog-rank test p-value:", summary(cph_model)$logtest[3], "\n"))
+      cat('\tP-value: ', cox.zph(cph_model)$table[,3], '\n')
+      cat(paste("\n\tlog-rank test p-value:", summary(cph_model)$logtest[3], "\n"))
       cat('\tThe variables with significant effect are:\n')
       print(cph_model)
     } else {
@@ -549,12 +543,44 @@ analyse_spreadsheet <- function(x, dsheet, msheet, rep_size, rec_style, cph=FALS
       print(cox.zph(cph_model)$table[,3]['GLOBAL'])
     }
   }
-  # for plotting (long-rank)
-  cat('\nLOG-RANK p-value\n')
-  cat('\n----------------\n')
-  model <- survdiff(Surv(hour, event) ~ treatment + genotype, data=fin_dat)
-  cat('The log-rank test gives a p-value of ', model$pvalue)
-  
-  return( fin_dat )
 }
 
+# --------------------------------------------------------------------
+
+analyse_spreadsheet <- function(
+  x, dsheet, msheet, rep_size, rec_style, time_unit='hour', cph=FALSE) {
+  
+  # LOAD THE DATA
+  # determine whether source is an excel file or an existing df
+  sour_ce <- check_source(x)
+  # read the event data from the appropriate sheet
+  dat <- load_data(sour_ce, x, dsheet)
+  # read the metadata if available
+  metadata <- load_metadata(sour_ce, x, msheet)
+  
+  # RECONCILE ARGUMENTS, METADATA, DATA COLUMN NAMES
+  # determine the size of the strata replicates
+  rep_size  <- set_rep_size(dat, metadata, rep_size)
+  # harmonise column names and very basic data cleanup (NAs...)
+  explanatory_vars <- c('genotype', 'treatment', 'sex', 'replicate', 'dose')
+  all_vars <- c('genotype', 'treatment', 'sex', 'replicate', 'dose',
+                'events', 'censored', 'dose_unit',
+                'date', 'time')
+  dat <- data_cleanup(dat, explanatory_vars, all_vars)
+  # determine whether events were recorded new or cumulative
+  strata_vars <- intersect(names(dat), explanatory_vars)
+  rec_style <- set_recording_style(dat, metadata, rep_size, strata_vars, rec_style)
+  
+  # TRANSFORM DATA TO TIME-TO-EVENT FORMAT
+  # express times as intervals since start of experiment
+  dat <- find_time_intervals(dat, explanatory_vars, rec_style, time_unit)
+  # move from rows-as-time intervals to rows-as-events
+  dat <- rowtime_to_rowevent(dat)
+  # include implicit censoring
+  dat <- implicit_censoring(dat, explanatory_vars)
+
+  # BASIC SURVIVAL MODELLING
+  basic_PH_test(dat)
+  
+  return( dat )
+}
