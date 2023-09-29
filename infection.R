@@ -148,7 +148,7 @@ repsize_cleanup <- function(rep_size, dat, explanatory_vars, experiment_vars) {
     if ( nrow( unique(expand_grid(dat[experiment_vars])) ) == nrow( unique(expand_grid(rep_size[confirmed_vars])) ) &
       all( unique(expand_grid(dat[confirmed_vars])) == unique(expand_grid(rep_size[confirmed_vars])) ) ) {
       # if so, assign as it is:
-      return ( unique(expand_grid(rep_size[c(experiment_vars, 'size)'])) )
+      return ( unique(expand_grid(rep_size[c(experiment_vars, 'size')])) )
     } else {
       stop(
         cat('\tYour replicate sizes seem to depend on MORE variables than the event data.\n',
@@ -312,6 +312,7 @@ set_recording_style <- function(dat, metadata, rep_size, strata_vars, rec_style)
       rec_style <- check_rec_style(dat, rep_size, strata_vars, rec_style)
     }
   }
+  cat('\tRecording mode established as "', rec_style, '".\n', sep='')
   return (rec_style)
 }
 
@@ -528,8 +529,11 @@ find_time_intervals <- function(dat, explanatory_vars, rec_style, time_unit) {
 
 # --------------------------------------------------------------------
 
-rowtime_to_rowevent <- function(dat) {
+rowtime_to_rowevent <- function(dat, explanatory_vars) {
   cat('---\n', 'Converting data from time-based to event-based...\n', sep='')
+  # store strata for later
+  experiment_vars <- intersect(names(dat), explanatory_vars)
+  original_grid <- unique(expand_grid(dat[experiment_vars]))
   # remove rows without data (events/censored separately)
   events_dat<- dat[ dat$events>0, !names(dat) %in% c('censored')]
   censor_dat<- dat[ dat$censored>0, !names(dat) %in% c('events')]
@@ -542,11 +546,23 @@ rowtime_to_rowevent <- function(dat) {
   }
   events_dat$event <- 1 # code for event=death
   censor_dat$event <- 0 # code for event=censoring
-  # combine
+  # combine & simplify
   dat <- rbind(events_dat, censor_dat)
   keeper_cols <- c("treatment", "dose", "dose_unit", "genotype", "sex",
                    "replicate", "time_to_event", "event")
   dat <- select(dat, all_of( intersect(keeper_cols, names(dat)) ))
+  # make sure strata with no events recorded are not lost
+  # compare strata/grids:
+  interim_grid <- unique(expand_grid(dat[experiment_vars]))
+  missing_strata <- anti_join(original_grid, interim_grid)
+  # restore strata without any event/censoring recorded
+  for (r in 1:nrow(missing_strata)) {
+    newrow <- missing_strata[r,]
+    newrow$dose_unit <- unique(dat$dose_unit)[[1]] # just in case - to be generalised
+    newrow$event <- 0
+    newrow$time_to_event <- max(dat$time_to_event)
+    dat <- rbind(dat, newrow)
+  }
   return (dat)
 }
 
@@ -557,8 +573,8 @@ implicit_censoring <- function(dat, explanatory_vars, rep_size) {
   # endpoint time for implicit censoring
   maxtime <- max(dat$time_to_event)
   # find out total numbers of 'accounted for' individuals
-  included_vars <- intersect(names(dat), explanatory_vars)
-  surv_dat <- aggregate(event ~ ., dat[,c(included_vars, 'event')], sum) # period indicates ALL variables
+  experiment_vars <- intersect(names(dat), explanatory_vars)
+  surv_dat <- aggregate(event ~ ., dat[,c(experiment_vars, 'event')], sum) # period indicates ALL variables
   # calculate remainder of individuals in each replicate per stratum 
   # if not all conditions have the same size
   if (is.data.frame(rep_size)) {
@@ -583,7 +599,7 @@ implicit_censoring <- function(dat, explanatory_vars, rep_size) {
   # create data rows per missed or endpoint censoring
   for (r in 1:nrow(surv_dat)) {
     # complete list of columns <--- this would need to be more generalised
-    newrow <- surv_dat[r,included_vars]
+    newrow <- surv_dat[r,experiment_vars]
     newrow$dose_unit <- unique(dat$dose_unit)[[1]] # just in case - to be generalised
     newrow$event <- 0
     newrow$time_to_event <- maxtime
@@ -652,7 +668,7 @@ analyse_spreadsheet <- function(
   # express times as intervals since start of experiment
   dat <- find_time_intervals(dat, explanatory_vars, rec_style, time_unit)
   # move from rows-as-time intervals to rows-as-events
-  dat <- rowtime_to_rowevent(dat)
+  dat <- rowtime_to_rowevent(dat, explanatory_vars)
   # include implicit censoring
   dat <- implicit_censoring(dat, explanatory_vars, rep_size)
 
