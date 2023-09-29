@@ -41,7 +41,7 @@ check_source <- function(x) {
 # --------------------------------------------------------------------
 
 load_data <- function(sour_ce, x, dsheet) {
-  cat('---\n')
+  cat('---\n', 'Loading event data...\n', sep='')
   if (sour_ce=='excel') {
     if (!missing(dsheet)){
       dat <- read_excel(x, sheet=dsheet)
@@ -75,7 +75,7 @@ load_data <- function(sour_ce, x, dsheet) {
 # --------------------------------------------------------------------
 
 load_metadata <- function(sour_ce, x, msheet) {
-  cat('---\n')
+  cat('---\n', 'Loading experiment metadata...\n', sep='')
   if (!sour_ce=='excel') return (NA)
   if (!missing(msheet)){
     metadata <- read_excel(x, sheet=msheet)
@@ -127,7 +127,7 @@ check_rep_size <- function(rep_size, default_rep_size) {
 # --------------------------------------------------------------------
 
 set_rep_size <- function(dat, metadata, rep_size) {
-  cat('---\n')
+  cat('---\n', 'Establishing replicates size...\n', sep='')
   # `rep_size`: number of individuals per replicate per stratum
   default_rep_size <- 20
   # if not argument given:
@@ -154,7 +154,7 @@ set_rep_size <- function(dat, metadata, rep_size) {
 
 # --------------------------------------------------------------------
 
-check_rec_style <- function(dat, rep_size, strata_vars) {
+check_rec_style <- function(dat, rep_size, strata_vars, rec_style) {
   # this is a compatibility test - not a guarantee!
   # NOT READY TO TAKE `rep_size` AS A DATAFRAME
   # check, for all strata, which replicates are compatible with 'cumulative' recording
@@ -190,7 +190,7 @@ check_rec_style <- function(dat, rep_size, strata_vars) {
 # --------------------------------------------------------------------
 
 set_recording_style <- function(dat, metadata, rep_size, strata_vars, rec_style) {
-  cat('---\n')
+  cat('---\n', 'Checking data recording mode (new/cumulative)...\n', sep='')
   # `rec_style`: whether the events have been recorded cumulatively or 'instantaneously'
   # if no argument given:
   if (missing(rec_style)) {
@@ -201,44 +201,42 @@ set_recording_style <- function(dat, metadata, rep_size, strata_vars, rec_style)
       if(!rec_style %in% c('cumulative', 'new')) {
         cat('The metadata provided no valid information about whether events were recorded cumulatively.\n',
             '`analyse_spreadsheet` will attempt to deduce this from the data.\n', sep='')
-        rec_style <- check_rec_style(dat, rep_size, strata_vars)
+        rec_style <- check_rec_style(dat, rep_size, strata_vars, rec_style)
       }
     # if metadata does not exist, deduce `rec_style` from the data
     } else {
       cat('There is no input information about whether events were recorded cumulatively.\n',
           '`analyse_spreadsheet` will attempt to deduce this from the data.\n', sep='')
-      rec_style <- check_rec_style(dat, rep_size, strata_vars)
+      rec_style <- check_rec_style(dat, rep_size, strata_vars, rec_style)
     }
   # if argument given:
   } else {
     # `rec_style` is declared as 'new'
     if (rec_style == 'new') {
       cat('You have specified that events were NOT recorded cumulatively.\n')
-      if (rec_style==check_rec_style(dat, rep_size, strata_vars)) {
-        cat('The data seem to have been recorded in this way.\n')
-      } else {
+      if (rec_style==check_rec_style(dat, rep_size, strata_vars, rec_style)) {}
+      else {
         cat('However, the data seem to have been recorded CUMULATIVELY.\n',
             '`analyse_spreadsheet` will go ahead assuming this was an error on your part,\n',
             'and analyse the data as if they were recorded cumulatively.\n',
             '---> PLEASE CHECK YOUR DATA <---', sep='')
-        rec_style <- check_rec_style(dat, rep_size, strata_vars)
+        rec_style <- check_rec_style(dat, rep_size, strata_vars, rec_style)
       }
     # `rec_style` is declared as 'cumulative'
     } else if (rec_style == 'cumulative') {
       cat('You have specified that events were recorded CUMULATIVELY.\n')
-      if (rec_style==check_rec_style(dat, rep_size, strata_vars)) {
-        cat('The data seem to have been recorded in this way.\n')
-      } else {
+      if (rec_style==check_rec_style(dat, rep_size, strata_vars)) {}
+      else {
         cat('However, the data seem to have been recorded NON-cumulatively.\n',
             '`analyse_spreadsheet` will go ahead assuming this was an error on your part,\n',
             'and analyse the data as if they were recorded non-cumulatively.\n',
             '---> PLEASE CHECK YOUR DATA <---', sep='')
-        rec_style <- check_rec_style(dat, rep_size, strata_vars)
+        rec_style <- check_rec_style(dat, rep_size, strata_vars, rec_style)
       }
     } else {
       cat('You have provided an invalid option for how the events were recorded.\n',
           '`analyse_spreadsheet` will attempt to deduce this from the data.\n', sep='')
-      rec_style <- check_rec_style(dat, rep_size, strata_vars)
+      rec_style <- check_rec_style(dat, rep_size, strata_vars, rec_style)
     }
   }
   return (rec_style)
@@ -247,7 +245,7 @@ set_recording_style <- function(dat, metadata, rep_size, strata_vars, rec_style)
 # --------------------------------------------------------------------
 
 data_cleanup <- function(dat, explanatory_vars, all_vars) {
-  cat('---\n')
+  cat('---\n', 'Harmonising data-variable names and cleaning up data...\n', sep='')
   ### column name cleanup
   # identify columns with date data
   date_match <- grep("date|^day", names(dat))
@@ -521,9 +519,10 @@ implicit_censoring <- function(dat, explanatory_vars) {
 
 # --------------------------------------------------------------------
 
-basic_PH_test <- function(dat, cph, expanatory_vars) {
-  cat('---\n', "Quick'n'dirty evaluation of Proportional Hazards in the data...\n", sep='')
+basic_PH_test <- function(dat, cph, explanatory_vars) {
+  if (missing(cph)) cph <- FALSE
   if (cph) {
+    cat('---\n', "Quick'n'dirty evaluation of Proportional Hazards in the data...\n", sep='')
     experiment_vars <- intersect(names(dat), explanatory_vars)
     experiment_vars <- experiment_vars[!experiment_vars=='replicate']
     fm <- formula(paste0('Surv(time_to_event, event) ~ ',
@@ -542,14 +541,16 @@ basic_PH_test <- function(dat, cph, expanatory_vars) {
       cat('\tSchoenfeld test shows PH assumption is NOT respected:\n\n')
       print(cox.zph(cph_model)$table[,3]['GLOBAL'])
     }
+  } else {
+    cat('---\n', "Evaluation of Proportional Hazards has not been requested.\n", sep='')
   }
 }
 
 # --------------------------------------------------------------------
 
 analyse_spreadsheet <- function(
-  x, dsheet, msheet, rep_size, rec_style, time_unit='hour', cph=FALSE) {
-  
+  x, dsheet, msheet, rep_size, rec_style, time_unit='hour', cph) {
+
   # LOAD THE DATA
   # determine whether source is an excel file or an existing df
   sour_ce <- check_source(x)
@@ -580,7 +581,7 @@ analyse_spreadsheet <- function(
   dat <- implicit_censoring(dat, explanatory_vars)
 
   # BASIC SURVIVAL MODELLING
-  basic_PH_test(dat)
+  basic_PH_test(dat, cph, explanatory_vars)
   
   return( dat )
 }
