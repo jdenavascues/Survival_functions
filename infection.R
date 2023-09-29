@@ -103,14 +103,8 @@ is.whole <- function(x) { is.numeric(x) && floor(x)==x }
 # --------------------------------------------------------------------
 
 check_rep_size <- function(rep_size, default_rep_size) {
-  # for the future case of having a table:
-  if (is.data.frame(rep_size)) {
-    cat('Sizes of stratum replicates are not equal.\n',
-        '`analyse_spreadsheet` is not ready yet to process this data.\n',
-        'A default value of rep_size = ', default_rep_size, ' will be used.\n', sep='')
-    return (default_rep_size)
   # for the usual case: a single positive whole number
-  } else if (is.whole(rep_size) && rep_size>0) {
+  if (is.whole(rep_size) && rep_size>0) {
     return (rep_size)
   # for negative/non-whole numbers:
   } else if (is.numeric(rep_size) && (rep_size<0 || !is.whole(rep_size))) {
@@ -126,7 +120,78 @@ check_rep_size <- function(rep_size, default_rep_size) {
 
 # --------------------------------------------------------------------
 
-set_rep_size <- function(dat, metadata, rep_size) {
+repsize_cleanup <- function(rep_size, dat, explanatory_vars, experiment_vars) {
+  cat('\tEstablishing variable size of replicates...\n')
+  # enforce sensible column nameing for basic variables
+  names(rep_size) <- gsub('s$', '', str_to_lower( names(rep_size) ))
+  # check rep_size colnames include `size`
+  if (!'size' %in% names(rep_size)) {
+    stop(
+      cat('\tYour input data for variable replicate sizes do NOT seem to have a `size` column.\n',
+           '\t`analyze_spreadsheet` cannot make sense of the input without this column.\n',
+           '\tVerify your dataset and, if necessary, rename the columns in the `rep_size` datasheet.\n', sep='')
+      )
+  }
+  # check rep_size colnames include experimental variables
+  confirmed_vars <- intersect(names(rep_size), explanatory_vars)
+  # if none included
+  if (length(confirmed_vars)==0){
+    cat('\tYour replicate sizes do NOT seem to be organised according to the usual\n',
+        '\texplanatory variables (genotype, treatment, dose, sex, and replicate).\n',
+        '\t`analyze_spreadsheet` will continue taking the MODE of the `size` column.\n',
+        '\tVerify your dataset and, if necessary, rename the columns in the `rep_size` datasheet.\n', sep='')
+    return (mode(rep_size$size))
+  }
+  # if more variables in rep_size than in event data
+  if (length(confirmed_vars)>length(experiment_vars)) {
+    # check actual unique rows are the same
+    if ( nrow( unique(expand_grid(dat[experiment_vars])) ) == nrow( unique(expand_grid(rep_size[confirmed_vars])) ) &
+      all( unique(expand_grid(dat[confirmed_vars])) == unique(expand_grid(rep_size[confirmed_vars])) ) ) {
+      # if so, assign as it is:
+      return ( unique(expand_grid(rep_size[c(experiment_vars, 'size)'])) )
+    } else {
+      stop(
+        cat('\tYour replicate sizes seem to depend on MORE variables than the event data.\n',
+            '\t`analyze_spreadsheet` cannot make sense of the input.\n',
+            '\tVerify your dataset and, if necessary, rename the columns in the `rep_size` datasheet.\n', sep='')
+      )
+    }
+  # if less variables in rep_size than in event data
+  } else if (length(confirmed_vars)<length(experiment_vars)) {
+    # assume the variables not included do not change the size in the strata they define
+    cat('\tYour replicate sizes depend on less variables than the event data.\n',
+        '\t`analyze_spreadsheet` will assume that replicate sizes are the same within the unspecified strata.\n',
+        '\tVerify your dataset and, if necessary, rename the columns in the `rep_size` datasheet.\n', sep='')
+    dropped_vars <- experiment_vars[!experiment_vars %in% confirmed_vars]
+    interim_size <- unique(expand_grid(dat[experiment_vars]))
+    # pivot wider until row numbers are the same
+    for (var in dropped_vars) {
+      interim_size <- pivot_wider(interim_size,
+                                  names_from = {var},
+                                  names_prefix = paste0(var, "-"),
+                                  values_from = {var})
+    }
+    # add size data
+    interim_size$size <- rep_size$size
+    # now pivot longer to repeat size data for all variables not included in `rep_size`
+    
+    #recover_vars <- names(interim_size)[!names(interim_size) %in% names(rep_size)]
+    
+    for (var in dropped_vars) {
+      interim_size <- pivot_longer(interim_size,
+                                   cols = starts_with(var),
+                                   names_to = paste0('dummy-', var),
+                                   values_to = {var})
+    }
+    rep_size <- select(interim_size, !starts_with('dummy'))
+    rep_size <- relocate(rep_size, size, .after = last_col())
+    return (rep_size)
+  }
+}
+
+# --------------------------------------------------------------------
+
+set_rep_size <- function(dat, metadata, rep_size, explanatory_vars) {
   cat('---\n', 'Establishing replicates size...\n', sep='')
   # `rep_size`: number of individuals per replicate per stratum
   default_rep_size <- 20
@@ -137,10 +202,12 @@ set_rep_size <- function(dat, metadata, rep_size) {
       rep_size <- as.numeric(metadata[metadata$Category=='Replicate_size','Value'][[1]])
       cat("Replicate size information found in the metadata.\n")
       # in case the rep_size is not the same for all stratum replicates:
-      if (rep_size=='table'){
+      if (rep_size=='table') {
         rep_size <- read_excel(x, sheet='rep_size')
-        names(rep_size) <- str_to_lower( names(rep_size) )
-      }
+        experiment_vars <- intersect(names(dat), explanatory_vars)
+        rep_size <- repsize_cleanup(rep_size, dat, explanatory_vars, experiment_vars)
+        return(rep_size)
+      } 
     } else {
       cat("No replicate size argument given and no information found in the metadata,",
           'or metadata is not provided.',
@@ -149,6 +216,12 @@ set_rep_size <- function(dat, metadata, rep_size) {
     }
   }
   rep_size <- check_rep_size(rep_size, default_rep_size)
+  if (length(rep_size)==1 && !is.data.frame(rep_size)) {
+    cat('\tReplicate size is determined as: \n\t', rep_size, '.\n', sep='')
+  } else if (is.data.frame(rep_size)) {
+    cat('\tReplicate size is variable across samples, ranging from ',
+        min(rep_size$size), ' to ', max(rep_size$size), '.\n', sep='')
+  }
   return (rep_size)
 }
 
@@ -479,7 +552,7 @@ rowtime_to_rowevent <- function(dat) {
 
 # --------------------------------------------------------------------
 
-implicit_censoring <- function(dat, explanatory_vars) {
+implicit_censoring <- function(dat, explanatory_vars, rep_size) {
   cat('---\n', 'Adding implicit (endpoint) or missed censoring events...\n', sep='')
   # endpoint time for implicit censoring
   maxtime <- max(dat$time_to_event)
@@ -490,7 +563,10 @@ implicit_censoring <- function(dat, explanatory_vars) {
   # if not all conditions have the same size
   if (is.data.frame(rep_size)) {
     try( if (nrow(rep_size)!=nrow(surv_dat)) {
-      stop("the table reporting replicate sizes in the excel file does not have the appropriate number of rows.")
+      stop(
+        cat('The table reporting replicate sizes in the excel file ',
+            'does not have the appropriate number of rows.\n', sep='')
+      )
       }
     )
     # find common colnames for surv_dat and rep_size
@@ -546,7 +622,7 @@ basic_PH_test <- function(dat, cph, explanatory_vars) {
   }
 }
 
-# --------------------------------------------------------------------
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 analyse_spreadsheet <- function(
   x, dsheet, msheet, rep_size, rec_style, time_unit='hour', cph) {
@@ -560,13 +636,13 @@ analyse_spreadsheet <- function(
   metadata <- load_metadata(sour_ce, x, msheet)
   
   # RECONCILE ARGUMENTS, METADATA, DATA COLUMN NAMES
-  # determine the size of the strata replicates
-  rep_size  <- set_rep_size(dat, metadata, rep_size)
+  # determine the size of the strata replicates &
   # harmonise column names and very basic data cleanup (NAs...)
   explanatory_vars <- c('genotype', 'treatment', 'sex', 'replicate', 'dose')
   all_vars <- c('genotype', 'treatment', 'sex', 'replicate', 'dose',
                 'events', 'censored', 'dose_unit',
                 'date', 'time')
+  rep_size  <- set_rep_size(dat, metadata, rep_size, explanatory_vars)
   dat <- data_cleanup(dat, explanatory_vars, all_vars)
   # determine whether events were recorded new or cumulative
   strata_vars <- intersect(names(dat), explanatory_vars)
@@ -578,7 +654,7 @@ analyse_spreadsheet <- function(
   # move from rows-as-time intervals to rows-as-events
   dat <- rowtime_to_rowevent(dat)
   # include implicit censoring
-  dat <- implicit_censoring(dat, explanatory_vars)
+  dat <- implicit_censoring(dat, explanatory_vars, rep_size)
 
   # BASIC SURVIVAL MODELLING
   basic_PH_test(dat, cph, explanatory_vars)
