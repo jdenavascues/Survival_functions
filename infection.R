@@ -103,7 +103,7 @@ is.whole <- function(x) { is.numeric(x) && floor(x)==x }
 
 # --------------------------------------------------------------------
 
-check_rep_size <- function(rep_size, default_rep_size) {
+check_rep_size <- function(dat, rep_size, default_rep_size) {
   
   # for the usual case: a single positive whole number
   if (is.whole(rep_size) && rep_size>0) {
@@ -224,7 +224,7 @@ set_rep_size <- function(dat, metadata, rep_size, explanatory_vars) {
   }
   
   # now check what we have and enforce it being workable
-  rep_size <- check_rep_size(rep_size, default_rep_size)
+  rep_size <- check_rep_size(dat, rep_size, default_rep_size)
   
   # now inform the user
   # if same number for all strata and replicates
