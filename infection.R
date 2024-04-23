@@ -588,10 +588,17 @@ rowtime_to_rowevent <- function(dat, explanatory_vars) {
   # remove rows without data (events/censored separately)
   events_dat <- dat[ dat$events > 0, !names(dat) %in% c('censored')]
   if ( any(grepl('censor', names(dat))) ) {
+    cat( '\n\nany(grepl("censor", names(dat))) IS', any(grepl('censor', names(dat)) ))
     censor_dat <- dat[ dat$censored>0, !names(dat) %in% c('events')]
   } else {
-    censor_dat <- filter(dat, events<0) %>% # empty
+    cat( '\n\nany(grepl("censor", names(dat))) IS', any(grepl('censor', names(dat)) ))
+    censor_dat <- filter(dat, NA) %>% # empty
       rename(censored=events)               # change events for censored
+    cat('\n\nnrow(censor_dat) is', nrow(censor_dat))
+    print(censor_dat[1,])
+    print(censor_dat[2,])
+    print(censor_dat[3,])
+    print(censor_dat[4,])
   }
   
   # replicate rows per their number of events, then turn into event=1
@@ -599,6 +606,11 @@ rowtime_to_rowevent <- function(dat, explanatory_vars) {
   # same with explicit censorings (if there are any!) and turn them into events
   if (nrow(censor_dat)>0) {
     cat('\n\n nrow(censor_dat)>0 \n\n')
+    cat('nrow(censor_dat) is', nrow(censor_dat))
+    print(censor_dat[1,])
+    print(censor_dat[2,])
+    print(censor_dat[3,])
+    print(censor_dat[4,])
     censor_dat <- censor_dat[rep(1:nrow(censor_dat), censor_dat$censored), ]
     names(censor_dat)[names(censor_dat)=='censored'] <- 'events'
   }
