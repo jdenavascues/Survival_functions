@@ -242,7 +242,7 @@ set_rep_size <- function(dat, metadata, rep_size, explanatory_vars) {
 
 # --------------------------------------------------------------------
 
-check_rec_style <- function(dat, rep_size, strata_vars, rec_style) {
+check_rec_style <- function(dat, rep_size, strata_vars) {
   # this is a compatibility test - not a guarantee!
 
   # check, for all strata, which replicates are compatible with 'cumulative' recording
@@ -326,14 +326,14 @@ set_recording_style <- function(dat, metadata, rep_size, strata_vars, rec_style)
       if(!rec_style %in% c('cumulative', 'new')) {
         cat('\nThe metadata provided no valid information about whether events were recorded cumulatively.\n',
             '`analyse_spreadsheet` will attempt to deduce this from the data.\n\n', sep='')
-        rec_style <- check_rec_style(dat, rep_size, strata_vars, rec_style)
+        rec_style <- check_rec_style(dat, rep_size, strata_vars)
       }
     
     # if metadata does not exist, deduce `rec_style` from the data
     } else {
       cat('\nThere is no input information about whether events were recorded cumulatively.\n',
           '`analyse_spreadsheet` will attempt to deduce this from the data.\n\n', sep='')
-      rec_style <- check_rec_style(dat, rep_size, strata_vars, rec_style)
+      rec_style <- check_rec_style(dat, rep_size, strata_vars)
     }
 
   # if argument given:
@@ -342,13 +342,13 @@ set_recording_style <- function(dat, metadata, rep_size, strata_vars, rec_style)
     # `rec_style` is declared as 'new'
     if (rec_style == 'new') {
       cat('\nYou have specified that events were NOT recorded cumulatively.\n')
-      if (rec_style == check_rec_style(dat, rep_size, strata_vars, rec_style)) {}
+      if (rec_style == check_rec_style(dat, rep_size, strata_vars)) {}
       else {
         cat('\nHowever, the data seem to have been recorded CUMULATIVELY.\n',
             '`analyse_spreadsheet` will go ahead assuming this was an error on your part,\n',
             'and analyse the data as if they were recorded cumulatively.\n',
             '---> PLEASE CHECK YOUR DATA <---', sep='')
-        rec_style <- check_rec_style(dat, rep_size, strata_vars, rec_style)
+        rec_style <- check_rec_style(dat, rep_size, strata_vars)
       }
     
     # `rec_style` is declared as 'cumulative'
@@ -360,14 +360,14 @@ set_recording_style <- function(dat, metadata, rep_size, strata_vars, rec_style)
             '`analyse_spreadsheet` will go ahead assuming this was an error on your part,\n',
             'and analyse the data as if they were recorded non-cumulatively.\n',
             '---> PLEASE CHECK YOUR DATA <---', sep='')
-        rec_style <- check_rec_style(dat, rep_size, strata_vars, rec_style)
+        rec_style <- check_rec_style(dat, rep_size, strata_vars)
       }
     
     # neither 'new' nor 'cumulative'
     } else {
       cat('\nYou have provided an invalid option for how the events were recorded.\n',
           '`analyse_spreadsheet` will attempt to deduce this from the data.\n', sep='')
-      rec_style <- check_rec_style(dat, rep_size, strata_vars, rec_style)
+      rec_style <- check_rec_style(dat, rep_size, strata_vars)
     }
   }
   cat('\n\tRecording mode established as "',
@@ -598,6 +598,7 @@ rowtime_to_rowevent <- function(dat, explanatory_vars) {
   events_dat <- events_dat[rep(1:nrow(events_dat), events_dat$events), ]
   # same with explicit censorings (if there are any!) and turn them into events
   if (nrow(censor_dat)>0) {
+    cat('\n\n nrow(censor_dat)>0 \n\n')
     censor_dat <- censor_dat[rep(1:nrow(censor_dat), censor_dat$censored), ]
     names(censor_dat)[names(censor_dat)=='censored'] <- 'events'
   }
