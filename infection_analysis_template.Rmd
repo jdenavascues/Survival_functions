@@ -1,0 +1,145 @@
+---
+title: "_daxx_ and innate immunity in _Drosophila_"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    toc_depth: 3
+    highlight: haddock
+---
+
+## Computing tools
+
+### Libraries
+```{r, message = FALSE, warning = FALSE}
+# data handling
+library(readxl)
+library(tidyverse)
+library(dplyr)
+# stats
+library(survival)
+library(survminer)
+# for plotting
+library(ggthemes) # italics in the figures
+library(ggtext) # italics in the figures
+library(RColorBrewer)
+#library(viridis)
+```
+
+### Custom function `analyse_spreadsheet`
+```{r, message = FALSE, warning = FALSE}
+devtools::source_url('https://raw.githubusercontent.com/jdenavascues/Survival_functions/main/infection.R')
+```
+
+## Experiment parameters
+
+* Start date: DD-MM-YYYY
+* Lab members: `z`
+* Genotypes:
+    * e.g. immunodeficient ( _key^1^_)
+    * _x-Gal4, UAS-y^RNAi-GD....^_
+    * _x-Gal4, UAS-ctrl^RNAi^_
+* Pathogen: e.g. _S. marcescens_ (Db11?, OD~600~? volume?)
+* Infection method: (oral, prickling, injection)
+
+## Overall log-rank stats and plotting
+
+### Load and organise data
+```{r,  echo = FALSE, message = FALSE, warning = FALSE}
+filepath <- file.path('/Users/JQ/Documents/__REPOS/GitHub/Survival_functions',
+                      'Infection_data_example.xlsx')
+data <- analyse_spreadsheet(filepath, cph=TRUE)
+```
+
+
+
+Prepare the graph:
+
+```{r,  echo = FALSE, message = FALSE, warning = FALSE}
+palette <- c('#85C1E9', '#999999', '#E74C3C', #'#F1C40F'
+             '#4444DD', '#000000', '#A2103C') # '#F39C12'
+line_type <- c(rep("solid",3),rep("twodash",3))
+title <- 'Susceptibility to *S. marcescens*'
+g <- ggsurvplot(surv_fit(Surv(hour, event) ~ genotype + treatment,
+                         data = data),
+                pval = TRUE,                       # adds pval
+                conf.int = TRUE,                   # adds 95% confidence interval
+                conf.int.alpha = 0.1,              # makes it more transparent
+                surv.median.line = "v",           # adds median points
+                palette = palette,
+                xlab = "Time (hours)",              # remove x axis label
+                ylab = "Survival Probability",     # y axis label
+                linetype = line_type,
+                title = title,
+                font.legend = c(7),               # legend size
+                legend = "bottom")                  # legend position
+```
+
+#### To prepare the legend:
+
+Let's have a look at our strata (by default organised as `genotype:treatment` in alphabetical order): 
+```{r,  echo = FALSE, message = FALSE, warning = FALSE}
+levels(g$data.survtable$strata)
+```
+But I'd like to present the strata as here:
+```{r,  echo = FALSE, message = FALSE, warning = FALSE}
+exgrid <- expand.grid(unique(sort(data$genotype, decreasing = TRUE)),
+                      unique(sort(data$treatment, decreasing = TRUE)))
+exgrid <- exgrid[order(exgrid$Var2),]
+lab_strata <- paste(exgrid$Var1, exgrid$Var2, sep=" | ")
+lab_strata
+```
+```{r}
+lab_strata <- c("*myoIA>ctrl^KD^* | Sucrose",
+                "*myoIA>Etl1^KD^* | Sucrose",
+                "*ken^1^* | Sucrose",
+                "*myoIA>ctrl^KD^* | S.marcescens",
+                "*myoIA>Etl1^KD^* | S.marcescens",
+                "*ken^1^* | S.marcescens")
+lab_strata
+```
+to match the colours and the line types like this:
+
+```{r,  echo = FALSE, message = FALSE, warning = FALSE, fig.height = 1, fig.width=2.5}
+x <- rep(c(1:20), 6)
+variable <- unlist(lapply(lab_strata, rep, 20))
+value <- c( 5+rnorm(20)/5, 4+rnorm(20)/5, 3+rnorm(20)/5,
+            2+rnorm(20)/5, 1+rnorm(20)/5, rnorm(20)/5 )
+df <- data.frame(x, variable, value)
+d <- ggplot(df, aes(x=x, y=value, group=variable, colour=variable )) +
+  geom_line(aes(linetype=variable, colour=variable)) +
+  scale_linetype_manual(breaks=lab_strata, values=line_type, labels=LETTERS[1:6]) +
+  scale_colour_manual(breaks=lab_strata, values=palette, labels=LETTERS[1:6]) +
+  theme(legend.text=element_text(size=5),
+        legend.title = element_text(size=6),
+        legend.key.height = unit(1/6, 'in'))
+d
+```
+
+To match what we want, the order of the legends, colours and line types should be like:
+```{r,  echo = FALSE, message = FALSE, warning = FALSE}
+lab_strata[c(1,3,2,4,6,5)]
+```
+And the reverse order would be:
+```{r,  echo = FALSE, message = FALSE, warning = FALSE}
+l <- levels(g$data.survtable$strata)[c(6,2,4,5,1,3)]
+l
+```
+Now we can start with the preliminary plot:
+
+```{r,  echo = FALSE, message = FALSE, warning = FALSE, fig.height = 3, fig.width=5}
+g$plot +
+  scale_colour_manual(name='', breaks=l, values=palette,
+                      labels=lab_strata[c(1,3,2,4,6,5)],
+                      guide=guide_legend(nrow = 3)) +
+  scale_fill_manual(name='', breaks=l, values=palette,
+                    labels=lab_strata[c(1,3,2,4,6,5)],
+                    guide=guide_legend(nrow = 3)) +
+  scale_linetype_manual(name='', breaks=l, values=line_type,
+                        labels=lab_strata[c(1,3,2,4,6,5)],
+                        guide=guide_legend(nrow = 3)) +
+  theme(legend.text=element_markdown(),
+        plot.title = element_markdown())
+```
+
+It seems that the only susceptible flies are the _ken^1^_

@@ -59,7 +59,7 @@ This is a convenient way for humans to capture the data (time-based), while the 
 This is done with the function `load_devtime_data`:
 ```{r, message = FALSE, warning = FALSE}
 # YOU WILL NEED TO ADAPT THESE LINES FOR R TO WORK WITH YOUR FILE IN YOUR COMPUTER
-filepath <- file.path('/Users/JQ/Documents/_CODE REPOS/GitHub/Survival_functions',
+filepath <- file.path('/Users/JQ/Documents/__REPOS/GitHub/Survival_functions',
                       'Pupariation_data_example.xlsx')
 data <- load_devtime_data(filepath)
 head(data, 5)
@@ -198,12 +198,12 @@ ggsave('mut_drug.pdf', plot=last_plot(),
 surv_median(model)
 ```
 
-```{r, warning= = FALSE, message = FALSE}
+```{r, warning= FALSE, message = FALSE}
 ratedata <- load_devtime_data(filepath, censor=TRUE)
 tail(ratedata)
 ```
 
-```{r, warning= = FALSE, message = FALSE}
+```{r, warning= FALSE, message = FALSE}
 pupas <- ratedata %>%
   subset(!(replicate==2 & genotype=='*wild-type*' & dose==50)) %>%
   filter(event==1) %>%
@@ -214,6 +214,7 @@ pupas$percent <- pupas$`n()`*100/rep_size
 pupas <- pupas[c('genotype', 'dose', 'percent')]
 pupas
 ```
+
 ```{r, message = FALSE, warning = FALSE}
 meanlines <- summarise(pupas, mean=mean(percent),
                        by=interaction('genotype', 'dose'), .groups='keep')

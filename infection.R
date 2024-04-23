@@ -10,7 +10,8 @@ library(stringr)
 # - implementing the use of rep_size as a table
 #   - cleanup column names as in data sheet, so then they coincide with the aggregate of events
 # - remove recorded censorship from automated total !!!
-
+# change perspective: first try to get all the info available in the Excel file (metadata, rep_file, etc)
+# once this is done, try to fill in the info
 
 check_source <- function(x) {
   # check input is a character
@@ -20,7 +21,7 @@ check_source <- function(x) {
       sour_ce <- 'excel'
     } else {
       stop(
-        cat('---\n', '`analyse_spreadsheet` cannot use the input data.\n',
+        cat('\n---\n', '`analyse_spreadsheet` cannot use the input data.\n',
             '`x` must be a suitable dataframe or a path to a suitable Excel file.\n',
             sep='')
       )
@@ -30,7 +31,7 @@ check_source <- function(x) {
     sour_ce <- 'dataframe'
   } else {
     stop(
-      cat('---\n', '`analyse_spreadsheet` cannot use the input data.\n',
+      cat('\n---\n', '`analyse_spreadsheet` cannot use the input data.\n',
           "`x` must be a suitable dataframe or a path to a suitable Excel file.\n",
           sep='')
     )
@@ -41,7 +42,7 @@ check_source <- function(x) {
 # --------------------------------------------------------------------
 
 load_data <- function(sour_ce, x, dsheet) {
-  cat('---\n', 'Loading event data...\n', sep='')
+  cat('\n---\n', 'Loading event data...\n', sep='')
   if (sour_ce=='excel') {
     if (!missing(dsheet)){
       dat <- read_excel(x, sheet=dsheet)
@@ -58,7 +59,7 @@ load_data <- function(sour_ce, x, dsheet) {
         cat("`analyse_spreadsheet` will extract data from sheet `tidy` (deduced).\n")
       } else {
         dat <- read_excel(x)
-        message(cat('You have not provided a spreadsheet name, nor your Excel file has\n',
+        message(cat('\nYou have not provided a spreadsheet name, nor your Excel file has\n',
                     'any of the usual names for time-to-event data in the lab.\n',
                     'We will continue using whatever is in the first sheet.', sep=''))
       }
@@ -75,7 +76,7 @@ load_data <- function(sour_ce, x, dsheet) {
 # --------------------------------------------------------------------
 
 load_metadata <- function(sour_ce, x, msheet) {
-  cat('---\n', 'Loading experiment metadata...\n', sep='')
+  cat('\n---\n', 'Loading experiment metadata...\n', sep='')
   if (!sour_ce=='excel') return (NA)
   if (!missing(msheet)){
     metadata <- read_excel(x, sheet=msheet)
@@ -86,7 +87,7 @@ load_metadata <- function(sour_ce, x, msheet) {
       metadata <- read_excel(x, sheet=excel_sheets(filepath)[m])
       cat("`analyse_spreadsheet` will read metadata from sheet `metadata` (deduced).\n")
     } else {
-      cat('You have not provided a spreadsheet name for the experiment\'s metadata,\n',
+      cat('\nYou have not provided a spreadsheet name for the experiment\'s metadata,\n',
           'nor your Excel file has any of the usual names for time-to-event ',
           'metadata in the lab.\nWe will continue using default values.', sep='')
       return (NULL)
@@ -103,16 +104,26 @@ is.whole <- function(x) { is.numeric(x) && floor(x)==x }
 # --------------------------------------------------------------------
 
 check_rep_size <- function(rep_size, default_rep_size) {
+  
   # for the usual case: a single positive whole number
   if (is.whole(rep_size) && rep_size>0) {
     return (rep_size)
-  # for negative/non-whole numbers:
+  
+  # for negative/non-whole numbers, abs value and round up:
   } else if (is.numeric(rep_size) && (rep_size<0 || !is.whole(rep_size))) {
-    cat('You have not provided a whole, positive number for the size of stratum replicates.\n',
+    cat('\nYou have not provided a whole, positive number for the size of stratum replicates.\n',
         'The value (', rep_size, ') will be taken as ', round(abs(rep_size)), '.\n', sep='')
     return (rep_size <- round(abs(rep_size)))
+  
+  # for different numbers per stratum replicate
+  } else if (is.data.frame(rep_size)) {
+    experiment_vars <- intersect(names(dat), explanatory_vars)
+    rep_size <- repsize_cleanup(rep_size, dat, explanatory_vars, experiment_vars)
+    return(rep_size)
+  
+  # no workable information -> set default
   } else {
-    cat('You have not provided a valid value for the size of stratum replicates.\n',
+    cat('\nYou have not provided a valid value for the size of stratum replicates.\n',
         'A default value of rep_size = ', default_rep_size, ' will be used.\n', sep='')
     return (default_rep_size)
   }
@@ -121,22 +132,26 @@ check_rep_size <- function(rep_size, default_rep_size) {
 # --------------------------------------------------------------------
 
 repsize_cleanup <- function(rep_size, dat, explanatory_vars, experiment_vars) {
-  cat('\tEstablishing variable size of replicates...\n')
-  # enforce sensible column nameing for basic variables
+  
+  cat('\n\tEstablishing variable size of replicates...\n')
+  
+  # enforce sensible column naming for basic variables
   names(rep_size) <- gsub('s$', '', str_to_lower( names(rep_size) ))
+  
   # check rep_size colnames include `size`
   if (!'size' %in% names(rep_size)) {
     stop(
-      cat('\tYour input data for variable replicate sizes do NOT seem to have a `size` column.\n',
+      cat('\n\tYour input data for variable replicate sizes do NOT seem to have a `size` column.\n',
            '\t`analyze_spreadsheet` cannot make sense of the input without this column.\n',
            '\tVerify your dataset and, if necessary, rename the columns in the `rep_size` datasheet.\n', sep='')
       )
   }
+  
   # check rep_size colnames include experimental variables
   confirmed_vars <- intersect(names(rep_size), explanatory_vars)
   # if none included
   if (length(confirmed_vars)==0){
-    cat('\tYour replicate sizes do NOT seem to be organised according to the usual\n',
+    cat('\n\tYour replicate sizes do NOT seem to be organised according to the usual\n',
         '\texplanatory variables (genotype, treatment, dose, sex, and replicate).\n',
         '\t`analyze_spreadsheet` will continue taking the MODE of the `size` column.\n',
         '\tVerify your dataset and, if necessary, rename the columns in the `rep_size` datasheet.\n', sep='')
@@ -151,7 +166,7 @@ repsize_cleanup <- function(rep_size, dat, explanatory_vars, experiment_vars) {
       return ( unique(expand_grid(rep_size[c(experiment_vars, 'size')])) )
     } else {
       stop(
-        cat('\tYour replicate sizes seem to depend on MORE variables than the event data.\n',
+        cat('\n\tYour replicate sizes seem to depend on MORE variables than the event data.\n',
             '\t`analyze_spreadsheet` cannot make sense of the input.\n',
             '\tVerify your dataset and, if necessary, rename the columns in the `rep_size` datasheet.\n', sep='')
       )
@@ -159,7 +174,7 @@ repsize_cleanup <- function(rep_size, dat, explanatory_vars, experiment_vars) {
   # if less variables in rep_size than in event data
   } else if (length(confirmed_vars)<length(experiment_vars)) {
     # assume the variables not included do not change the size in the strata they define
-    cat('\tYour replicate sizes depend on less variables than the event data.\n',
+    cat('\n\tYour replicate sizes depend on less variables than the event data.\n',
         '\t`analyze_spreadsheet` will assume that replicate sizes are the same within the unspecified strata.\n',
         '\tVerify your dataset and, if necessary, rename the columns in the `rep_size` datasheet.\n', sep='')
     dropped_vars <- experiment_vars[!experiment_vars %in% confirmed_vars]
@@ -174,9 +189,6 @@ repsize_cleanup <- function(rep_size, dat, explanatory_vars, experiment_vars) {
     # add size data
     interim_size$size <- rep_size$size
     # now pivot longer to repeat size data for all variables not included in `rep_size`
-    
-    #recover_vars <- names(interim_size)[!names(interim_size) %in% names(rep_size)]
-    
     for (var in dropped_vars) {
       interim_size <- pivot_longer(interim_size,
                                    cols = starts_with(var),
@@ -185,43 +197,46 @@ repsize_cleanup <- function(rep_size, dat, explanatory_vars, experiment_vars) {
     }
     rep_size <- select(interim_size, !starts_with('dummy'))
     rep_size <- relocate(rep_size, size, .after = last_col())
-    return (rep_size)
   }
+  return (rep_size)
 }
 
 # --------------------------------------------------------------------
 
 set_rep_size <- function(dat, metadata, rep_size, explanatory_vars) {
-  cat('---\n', 'Establishing replicates size...\n', sep='')
+  
+  cat('\n---\n', 'Establishing replicates size...\n', sep='')
+  
   # `rep_size`: number of individuals per replicate per stratum
   default_rep_size <- 20
-  # if not argument given:
-  if (missing(rep_size)) {
-    # extract it from metadata
-    if (!is.null(metadata)) {
+  
+  # if not argument given, extract it from metadata or make assumption:
+  if ( missing(rep_size) ) {
+    if ( !is.null(metadata) && !is.na(metadata) ) {
       rep_size <- as.numeric(metadata[metadata$Category=='Replicate_size','Value'][[1]])
       cat("Replicate size information found in the metadata.\n")
-      # in case the rep_size is not the same for all stratum replicates:
-      if (rep_size=='table') {
-        rep_size <- read_excel(x, sheet='rep_size')
-        experiment_vars <- intersect(names(dat), explanatory_vars)
-        rep_size <- repsize_cleanup(rep_size, dat, explanatory_vars, experiment_vars)
-        return(rep_size)
-      } 
     } else {
       cat("No replicate size argument given and no information found in the metadata,",
-          'or metadata is not provided.',
+          'or metadata is not provided.\n',
           'A default value of rep_size = ', default_rep_size, ' will be used.\n', sep='')
       return (default_rep_size)
     }
   }
+  
+  # now check what we have and enforce it being workable
   rep_size <- check_rep_size(rep_size, default_rep_size)
+  
+  # now inform the user
+  # if same number for all strata and replicates
   if (length(rep_size)==1 && !is.data.frame(rep_size)) {
-    cat('\tReplicate size is determined as: \n\t', rep_size, '.\n', sep='')
+    cat('\n\tReplicate size is determined as: \n\t', rep_size, '.\n', sep='')
+    
+  # if different numbers for strata/replicates
   } else if (is.data.frame(rep_size)) {
-    cat('\tReplicate size is variable across samples, ranging from ',
+    cat('\n\tReplicate size is variable across samples, ranging from ',
         min(rep_size$size), ' to ', max(rep_size$size), '.\n', sep='')
   }
+
   return (rep_size)
 }
 
@@ -229,31 +244,63 @@ set_rep_size <- function(dat, metadata, rep_size, explanatory_vars) {
 
 check_rec_style <- function(dat, rep_size, strata_vars, rec_style) {
   # this is a compatibility test - not a guarantee!
-  # NOT READY TO TAKE `rep_size` AS A DATAFRAME
+
   # check, for all strata, which replicates are compatible with 'cumulative' recording
   # (i.e. show constant or ever-increasing event records)
   check <- dat %>%
     reframe(diff=diff(events), .by=all_of(strata_vars)) %>%
     reframe(cumulative_xdiff=all(diff>=0),  .by=all_of(strata_vars))
   cumulative_compatible <- data.frame(diff = check$cumulative_xdiff)
-  # check, for all strata, that total events are compatible with 'cumulative' recording
+  # check, for all strata, that total events are compatible with 'new' recording
   # (i.e. sum of all events "expressed" is not larger than rep_size)
-  check <- dat %>%
-    summarise(sum=sum(events), .by=all_of(strata_vars)) %>%
-    summarise(cumulative_xsum=all(sum>rep_size), .by=all_of(strata_vars))
-  cumulative_compatible$sum <- check$cumulative_xsum
+  if (is.whole(rep_size)) {
+    check <- dat %>%
+      summarise(sum=sum(events), .by=all_of(strata_vars)) %>%
+      summarise(cumulative_xsum=all(sum>rep_size), .by=all_of(strata_vars))
+    cumulative_compatible$sum <- check$cumulative_xsum
+  } else if (is.data.frame(rep_size)) {
+    check <- dat %>%
+      summarise(sum=sum(events), .by=all_of(strata_vars)) %>%
+      summarise(cumulative_xsum=all(sum>rep_size$size), .by=all_of(strata_vars))
+    cumulative_compatible$sum <- check$cumulative_xsum
+  }
+
   # if all strata replicates have records that are always increasing or
   # that add up to more than rep_size, it could be that recording is cumulative
   cumulative_compatible$cumulative <- (cumulative_compatible$diff | cumulative_compatible$sum)
-  if ( all(cumulative_compatible$cumulative) ) {
-    cat('`analyze_spreadsheet` finds evidence of cumulative ',
+  cumul_rate <- sum(cumulative_compatible$cumulative) / nrow(cumulative_compatible)
+  
+  # if all strata/replicates show cumulative behaviour (in pattern or sum)
+  if ( cumul_rate==1 ) {
+    cat('\n`analyze_spreadsheet` finds strong evidence of cumulative ',
         'recording in every stratum replicate.\n',
         'It will be assumed that "cumulative" events were recorded ',
         'at each observation.\n', sep='')
     return ('cumulative')
+    
+  # if more than half the strata/replicates show cumulative behaviour
+  } else if (cumul_rate > 0.5) {
+    cat('\n`analyze_spreadsheet` finds evidence of cumulative ',
+        'recording in a majority (~', round(cumul_rate*100), '%) of strata replicates.\n',
+        'It will be assumed that "cumulative" events were recorded at each observation',
+        'and `analyze_spreadsheet` will attempt to repair the data.\n', sep='')
+    # repair "lost corpses"
+    dat <<- dat %>%
+      # find the diff(events) with 0 as first element using lag, by strata
+      mutate(dif = events - lag(events, default=first(events)), .by=all_of(strata_vars)) %>%
+      # keep only the negative values (corpses disappear)
+      mutate(steps=ifelse(dif<0, abs(dif), 0)) %>%
+      # get the cumsum of the absolute value and add to the events, by strata
+      mutate(cumdif = cumsum(abs(steps)), .by=all_of(strata_vars)) %>%
+      mutate(events = events+cumdif) %>%
+      # clean up
+      select(!c(dif, steps, cumdif))
+    return ('cumulative')
+  
+  # if less than half the strata/replicates show cumulative behaviour:
   } else {
-    cat('`analyze_spreadsheet` does not find evidence of cumulative ',
-        'recording in every stratum replicate.\n',
+    cat('\n`analyze_spreadsheet` finds little evidence of cumulative ',
+        'recording: only in ~', round(cumul_rate*100), '% of strata replicates.\n',
         'It will be assumed that only "new" events were recorded ',
         'at each observation.\n', sep='')
     return ('new')
@@ -263,76 +310,90 @@ check_rec_style <- function(dat, rep_size, strata_vars, rec_style) {
 # --------------------------------------------------------------------
 
 set_recording_style <- function(dat, metadata, rep_size, strata_vars, rec_style) {
-  cat('---\n', 'Checking data recording mode (new/cumulative)...\n', sep='')
+  
   # `rec_style`: whether the events have been recorded cumulatively or 'instantaneously'
+  cat('\n---\n', 'Checking data recording mode (new/cumulative)...\n', sep='')
+
   # if no argument given:
   if (missing(rec_style)) {
+    cat('\nYou have not provided information about whether events were recorded cumulatively.\n',
+        '`analyse_spreadsheet` will attempt to deduce this from the data/metadata.\n\n', sep='')
+    
     # getting it from metadata
-    if (!is.null(metadata)) {
+    if ( !is.null(metadata) && !is.na(metadata) ) {
       rec_style <- metadata[metadata$Category=='Recording_style','Value'][[1]]
       # if not valid, deduce `rec_style` from the data
       if(!rec_style %in% c('cumulative', 'new')) {
-        cat('The metadata provided no valid information about whether events were recorded cumulatively.\n',
-            '`analyse_spreadsheet` will attempt to deduce this from the data.\n', sep='')
+        cat('\nThe metadata provided no valid information about whether events were recorded cumulatively.\n',
+            '`analyse_spreadsheet` will attempt to deduce this from the data.\n\n', sep='')
         rec_style <- check_rec_style(dat, rep_size, strata_vars, rec_style)
       }
+    
     # if metadata does not exist, deduce `rec_style` from the data
     } else {
-      cat('There is no input information about whether events were recorded cumulatively.\n',
-          '`analyse_spreadsheet` will attempt to deduce this from the data.\n', sep='')
+      cat('\nThere is no input information about whether events were recorded cumulatively.\n',
+          '`analyse_spreadsheet` will attempt to deduce this from the data.\n\n', sep='')
       rec_style <- check_rec_style(dat, rep_size, strata_vars, rec_style)
     }
+
   # if argument given:
   } else {
+    
     # `rec_style` is declared as 'new'
     if (rec_style == 'new') {
-      cat('You have specified that events were NOT recorded cumulatively.\n')
-      if (rec_style==check_rec_style(dat, rep_size, strata_vars, rec_style)) {}
+      cat('\nYou have specified that events were NOT recorded cumulatively.\n')
+      if (rec_style == check_rec_style(dat, rep_size, strata_vars, rec_style)) {}
       else {
-        cat('However, the data seem to have been recorded CUMULATIVELY.\n',
+        cat('\nHowever, the data seem to have been recorded CUMULATIVELY.\n',
             '`analyse_spreadsheet` will go ahead assuming this was an error on your part,\n',
             'and analyse the data as if they were recorded cumulatively.\n',
             '---> PLEASE CHECK YOUR DATA <---', sep='')
         rec_style <- check_rec_style(dat, rep_size, strata_vars, rec_style)
       }
+    
     # `rec_style` is declared as 'cumulative'
-    } else if (rec_style == 'cumulative') {
-      cat('You have specified that events were recorded CUMULATIVELY.\n')
+    } else if ( grepl('cum', rec_style) ) {
+      cat('\nYou have specified that events were recorded CUMULATIVELY.\n')
       if (rec_style==check_rec_style(dat, rep_size, strata_vars)) {}
       else {
-        cat('However, the data seem to have been recorded NON-cumulatively.\n',
+        cat('\nHowever, the data seem to have been recorded NON-cumulatively.\n',
             '`analyse_spreadsheet` will go ahead assuming this was an error on your part,\n',
             'and analyse the data as if they were recorded non-cumulatively.\n',
             '---> PLEASE CHECK YOUR DATA <---', sep='')
         rec_style <- check_rec_style(dat, rep_size, strata_vars, rec_style)
       }
+    
+    # neither 'new' nor 'cumulative'
     } else {
-      cat('You have provided an invalid option for how the events were recorded.\n',
+      cat('\nYou have provided an invalid option for how the events were recorded.\n',
           '`analyse_spreadsheet` will attempt to deduce this from the data.\n', sep='')
       rec_style <- check_rec_style(dat, rep_size, strata_vars, rec_style)
     }
   }
-  cat('\tRecording mode established as "', rec_style, '".\n', sep='')
+  cat('\n\tRecording mode established as "',
+      ifelse(is.data.frame(rec_style), 'a `data.frame`', rec_style),
+      '".\n', sep='')
+  
   return (rec_style)
 }
 
 # --------------------------------------------------------------------
 
 data_cleanup <- function(dat, explanatory_vars, all_vars) {
-  cat('---\n', 'Harmonising data-variable names and cleaning up data...\n', sep='')
+  cat('\n---\n', 'Harmonising data-variable names and cleaning up data...\n', sep='')
   ### column name cleanup
   # identify columns with date data
   date_match <- grep("date|^day", names(dat))
   if (length(date_match)==0) {
     stop(
-      cat('You do not seem to have any column specifying the date of the observations, ',
+      cat('\nYou do not seem to have any column specifying the date of the observations, ',
           'or it is NOT named in any of the usual ways ("date", "day", and derivatives).\n',
           '`analyze_spreadsheet` cannot continue without these data.\n',
           'Verify your dataset and, if necessary, rename the columns.\n', sep='')
     )
   } else if (length(date_match)>1) {
     stop(
-      cat('You seem to have more than one column specifying dates, ',
+      cat('\nYou seem to have more than one column specifying dates, ',
           'according to the usual names for this ("date", "day", and derivatives).\n',
           '`analyze_spreadsheet` cannot continue with this ambiguity.\n',
           'Verify your dataset and, if necessary, rename the columns.\n', sep='')
@@ -344,15 +405,15 @@ data_cleanup <- function(dat, explanatory_vars, all_vars) {
   # identify columns with time data
   time_match <- grep("time|hour|hh", names(dat))
   if (length(time_match)==0) {
-    strop(
-      cat('You do not seem to have any column specifying the time of the day of the observations, ',
+    stop(
+      cat('\nYou do not seem to have any column specifying the time of the day of the observations, ',
           'or it is NOT named in any of the usual ways ("time", "hour", "hh:mm", and derivatives).\n',
           '`analyze_spreadsheet` cannot continue without these data.\n',
           'Verify your dataset and, if necessary, rename the columns.\n', sep='')
     )
   } else if (length(time_match)>1) {
     stop(
-      cat('You seem to have more than one column specifying time of the day, ',
+      cat('\nYou seem to have more than one column specifying time of the day, ',
           'according to the usual names for this ("time", "hour", "hh:mm", and derivatives).\n',
           '`analyze_spreadsheet` cannot continue with this ambiguity.\n',
           'Verify your dataset and, if necessary, rename the columns.\n', sep='')
@@ -365,14 +426,14 @@ data_cleanup <- function(dat, explanatory_vars, all_vars) {
   event_match <- grep("death|dead|event", names(dat))
   if (length(event_match)==0) {
     stop(
-      cat('You do not seem to have any column with event data, ',
+      cat('\nYou do not seem to have any column with event data, ',
           'or it is NOT named in any of the usual ways ("deaths", "dead", "events", and derivatives)).\n',
           '`analyze_spreadsheet` cannot continue without these data.\n',
           'Verify your dataset and, if necessary, rename the columns.\n', sep='')
     )
   } else if (length(event_match)>1) {
     stop(
-      cat('You seem to have more than one column with event data, ',
+      cat('\nYou seem to have more than one column with event data, ',
           'according to the usual names for this ("deaths", "dead", "events", and derivatives).\n',
           '`analyze_spreadsheet` cannot continue with this ambiguity.\n',
           'Verify your dataset and, if necessary, rename the columns.\n', sep='')
@@ -384,14 +445,14 @@ data_cleanup <- function(dat, explanatory_vars, all_vars) {
   # identify columns with censoring data
   censoring_match <- grep("censor", names(dat))
   if (length(censoring_match)==0) {
-    cat('You do not seem to have any column with censoring data, ',
+    cat('\nYou do not seem to have any column with censoring data, ',
         'or it is NOT named in any of the usual ways ("censored", "censoring", and derivatives).\n',
         '`analyze_spreadsheet` will continue assuming that all individuals were censored ',
         'after the last observational timepoint.\n',
         'If this is not what happened, verify your dataset and, if necessary, rename the columns.\n', sep='')
   } else if (length(censoring_match)>1) {
     stop(
-      cat('You seem to have more than one column with censoring data, ',
+      cat('\nYou seem to have more than one column with censoring data, ',
           'according to the usual names for this ("censored", "censoring", and derivatives).\n',
           '`analyze_spreadsheet` cannot continue with this ambiguity.\n',
           'Verify your dataset and, if necessary, rename the columns.\n', sep='')
@@ -403,11 +464,11 @@ data_cleanup <- function(dat, explanatory_vars, all_vars) {
   # identify column with dose unit data (before identifying dose column)
   unit_match <- grep("unit", names(dat))
   if (length(unit_match)==0) {
-    cat('You do not seem to have any column with specifying the units used to describe the dose of a treatment.\n',
+    cat('\nYou do not seem to have any column with specifying the units used to describe the dose of a treatment.\n',
         '`analyze_spreadsheet` will continue assuming that this is not relevant.\n',
         'If this is not the case, verify your dataset and, if necessary, rename the columns.\n', sep='')
   } else if (length(unit_match)>1) {
-    cat('You seem to have more than one column expressing units (presumably of a treatment dose).\n',
+    cat('\nYou seem to have more than one column expressing units (presumably of a treatment dose).\n',
         '`analyze_spreadsheet` will continue assuming that this is not relevant, and drop these data.\n',
         'If this is not the case, verify your dataset and, if necessary, rename the columns.\n', sep='')
     dat <- select(dat, -names(dat)[unit_match])
@@ -418,11 +479,11 @@ data_cleanup <- function(dat, explanatory_vars, all_vars) {
   # identify column with dose data
   dose_match <- names(dat)[setdiff(grep("dose", names(dat)), grep("_unit", names(dat)))]
   if (length(dose_match)==0) {
-    cat('You do not seem to have any column with specifying the dose of a treatment.\n',
+    cat('\nYou do not seem to have any column with specifying the dose of a treatment.\n',
         '`analyze_spreadsheet` will continue assuming that this is not relevant.\n',
         'If this is not the case, verify your dataset and, if necessary, rename the columns.\n', sep='')
   } else if (length(dose_match)>1) {
-    cat('You seem to have more than one column expressing treatment dose.\n',
+    cat('\nYou seem to have more than one column expressing treatment dose.\n',
         '`analyze_spreadsheet` will continue assuming that this is not relevant, and drop these data.\n',
         'If this is not the case, verify your dataset and, if necessary, rename the columns.\n', sep='')
     dat <- select(dat, -names(dat)[dose_match])
@@ -434,18 +495,18 @@ data_cleanup <- function(dat, explanatory_vars, all_vars) {
   confirmed_vars <- intersect(names(dat), explanatory_vars)
   if (length(confirmed_vars)==0){
     stop(
-      cat('You do not seem to have any of the usual variables ',
-          '(genotype, treatment, dose, sex, replicate).\n',
+      cat('\nYou do not seem to have any of the usual variables ',
+          '(genotype, treatment(s), dose, sex, replicate).\n',
           '`analyze_spreadsheet` cannot continue without at least some of these data.\n',
           'Verify your dataset and, if necessary, rename the columns.\n', sep='')
       )
   } else if (length(confirmed_vars)==5) {
-    cat('The usual explanatory variables are: ',
-        '"genotype", "treatment", "dose", "sex" and "replicate".\n',
+    cat('\nThe usual explanatory variables are: ',
+        '"genotype", "treatment(s)", "dose", "sex" and "replicate".\n',
         'You seem to have all ', length(confirmed_vars), ' of them.\n', sep='')
   } else {
-    cat('The usual explanatory variables are: ',
-        '"genotype", "treatment", "dose", "sex" and "replicate".\n',
+    cat('\nThe usual explanatory variables are: ',
+        '"genotype", "treatment(s)", "dose", "sex" and "replicate".\n',
         'You seem to have ', length(confirmed_vars), ' of them: ',
         paste(confirmed_vars, collapse=', '), '.\n',
         '`analyze_spreadsheet` will continue using these explanatory variables only.\n',
@@ -455,7 +516,7 @@ data_cleanup <- function(dat, explanatory_vars, all_vars) {
   # remove un-interpretable columns
   extra_vars <- setdiff(names(dat), all_vars)
   if (length(extra_vars)>0){
-    cat('You have the additional variable(s):',
+    cat('\nYou have the additional variable(s):',
         paste(extra_vars, collapse=', '), '.\n',
         '`analyze_spreadsheet` will continue assuming that these are not relevant, and drop these data.\n',
         'If this is not the case, verify your dataset and, if necessary, rename the columns.\n', sep='')
@@ -475,21 +536,8 @@ data_cleanup <- function(dat, explanatory_vars, all_vars) {
 
 # --------------------------------------------------------------------
 
-f <- function(x, y) {
-  # this is just to change the format of the date.
-  fout <- "%Y-%m-%d"
-  # get the date as a string...
-  d <- format(x, format=fout)
-  # get the time as string, separate from the old date...
-  t <- strsplit(as.character(y), split=' ')[[1]][[2]]
-  # paste together in standard format...
-  paste(d, t)
-}
-
-# --------------------------------------------------------------------
-
 find_time_intervals <- function(dat, explanatory_vars, rec_style, time_unit) {
-  cat('---\n', 'Establishing time-to-event intervals...\n', sep='')
+  cat('\n---\n', 'Establishing time-to-event intervals...\n', sep='')
   
   # standardise time_unit name (case, plural, valid options)
   time_unit <- str_to_lower(time_unit)
@@ -497,7 +545,7 @@ find_time_intervals <- function(dat, explanatory_vars, rec_style, time_unit) {
   time_unit_list <- c("seconds", "secs", "minutes", "mins",
                       "auto", "hours", "days", "weeks") # options for `difftime`
   if (!time_unit %in% time_unit_list) {
-    cat('You have not specified a valid time unit for expressing time-to-event intervals.\n',
+    cat('\nYou have not specified a valid time unit for expressing time-to-event intervals.\n',
         '`analyze_spreadsheet` will pick a time unit automatically.\n', sep='')
     time_unit <- 'auto'
   }
@@ -506,15 +554,15 @@ find_time_intervals <- function(dat, explanatory_vars, rec_style, time_unit) {
   
   # standardise time format and obtain interval
   format_in <- "%d.%m.%Y"
-  dat$date <- as.Date(dat$date, format=format_in)
-  dat$time2 <- apply(dat[,c('date', 'time')], 1, function(w) f(w['date'], w['time']))
-  dat$time2 <- as.POSIXct(dat$time2)
-  dat$time_to_event <- signif(difftime(dat$time2, dat$time2[1], units = time_unit), 3)
+  dat %<>% 
+    mutate( date = as.Date(date, format=format_in)) %>%
+    mutate( time2 = as.POSIXct(paste( date, time ), format="%Y-%m-%d %H:%M:%S")) %>%
+    mutate( time_to_event = signif(difftime( time2, time2[1], units = time_unit ), 3))
   
   # turn cumulative events into new ones-only
-  cat('Establishing individual events (non-cumulative)...\n')
+  cat('\nEstablishing individual events (non-cumulative)...\n')
   included_vars <- intersect(names(dat), explanatory_vars)
-  if (rec_style == 'cumulative') {
+  if  (rec_style == 'cumulative') {
     var_combos <- unique(expand_grid(dat[included_vars]))
     for (row in 1:nrow(var_combos)) {
       combo <- var_combos[row, ]
@@ -530,57 +578,76 @@ find_time_intervals <- function(dat, explanatory_vars, rec_style, time_unit) {
 # --------------------------------------------------------------------
 
 rowtime_to_rowevent <- function(dat, explanatory_vars) {
-  cat('---\n', 'Converting data from time-based to event-based...\n', sep='')
+  cat('\n---\n', 'Converting data from time-based to event-based...\n', sep='')
+  
   # store strata for later
   experiment_vars <- intersect(names(dat), explanatory_vars)
   original_grid <- unique(expand_grid(dat[experiment_vars]))
+  
   # remove rows without data (events/censored separately)
-  events_dat<- dat[ dat$events>0, !names(dat) %in% c('censored')]
-  censor_dat<- dat[ dat$censored>0, !names(dat) %in% c('events')]
+  events_dat <- dat[ dat$events > 0, !names(dat) %in% c('censored')]
+  if ( any(grepl('censor', names(dat))) ) {
+    censor_dat <- dat[ dat$censored>0, !names(dat) %in% c('events')]
+  } else {
+    censor_dat <- filter(dat, events<0) %>% # empty
+      rename(censored=events)               # change events for censored
+  }
+  
   # replicate rows per their number of events, then turn into event=1
   events_dat <- events_dat[rep(1:nrow(events_dat), events_dat$events), ]
-  # same with explicit censorings (if there are any!)
+  # same with explicit censorings (if there are any!) and turn them into events
   if (nrow(censor_dat)>0) {
     censor_dat <- censor_dat[rep(1:nrow(censor_dat), censor_dat$censored), ]
     names(censor_dat)[names(censor_dat)=='censored'] <- 'events'
   }
+  # new col with _type_ (not number) of event
   events_dat$event <- 1 # code for event=death
   censor_dat$event <- 0 # code for event=censoring
-  # combine & simplify
+  
+  # combine deaths and censorings, remove unwanted cols
   dat <- rbind(events_dat, censor_dat)
-  keeper_cols <- c("treatment", "dose", "dose_unit", "genotype", "sex",
-                   "replicate", "time_to_event", "event")
+  keeper_cols <- c(experiment_vars, "time_to_event", "event")
   dat <- select(dat, all_of( intersect(keeper_cols, names(dat)) ))
+  
   # make sure strata with no events recorded are not lost
   # compare strata/grids:
   interim_grid <- unique(expand_grid(dat[experiment_vars]))
-  missing_strata <- anti_join(original_grid, interim_grid)
+  missing_strata <- anti_join(original_grid, interim_grid,
+                              by = join_by( !!!experiment_vars ))
   # restore strata without any event/censoring recorded
   for (r in 1:nrow(missing_strata)) {
     newrow <- missing_strata[r,]
-    newrow$dose_unit <- unique(dat$dose_unit)[[1]] # just in case - to be generalised
+    if ('dose_unit' %in% experiment_vars) {
+      newrow$dose_unit <- unique(dat$dose_unit)[[1]] # just in case - to be generalised
+    }
     newrow$event <- 0
     newrow$time_to_event <- max(dat$time_to_event)
     dat <- rbind(dat, newrow)
   }
+  
   return (dat)
 }
 
 # --------------------------------------------------------------------
 
 implicit_censoring <- function(dat, explanatory_vars, rep_size) {
-  cat('---\n', 'Adding implicit (endpoint) or missed censoring events...\n', sep='')
-  # endpoint time for implicit censoring
-  maxtime <- max(dat$time_to_event)
+  
+  cat('\n---\n', 'Adding implicit (endpoint) or missed censoring events...\n', sep='')
+  
+  maxtime <- max(dat$time_to_event) # endpoint time for implicit censoring
+  
   # find out total numbers of 'accounted for' individuals
   experiment_vars <- intersect(names(dat), explanatory_vars)
-  surv_dat <- aggregate(event ~ ., dat[,c(experiment_vars, 'event')], sum) # period indicates ALL variables
-  # calculate remainder of individuals in each replicate per stratum 
+  surv_dat <- aggregate(event ~ ., # period indicates ALL variables
+                        dat[,c(experiment_vars, 'event')],
+                        sum)
+  
+  # calculate remainder of individuals in each replicate per stratum
   # if not all conditions have the same size
   if (is.data.frame(rep_size)) {
     try( if (nrow(rep_size)!=nrow(surv_dat)) {
       stop(
-        cat('The table reporting replicate sizes in the excel file ',
+        cat('\nThe table reporting replicate sizes in the excel file ',
             'does not have the appropriate number of rows.\n', sep='')
       )
       }
@@ -592,15 +659,20 @@ implicit_censoring <- function(dat, explanatory_vars, rep_size) {
     matches <- match(keys$y, keys$x, nomatch=(keys$n+1))
     # use the new order to get numbers of survivors per vial at termination
     surv_dat$censored <- rep_size[order(matches),]$size - surv_dat$event
+  
+  # calculate remainder of individuals in each replicate per stratum
   # if all conditions do have the same size:
   } else if (is.numeric(rep_size)) {
     surv_dat$censored <- rep_size - surv_dat$event
   }
+  
   # create data rows per missed or endpoint censoring
   for (r in 1:nrow(surv_dat)) {
     # complete list of columns <--- this would need to be more generalised
     newrow <- surv_dat[r,experiment_vars]
-    newrow$dose_unit <- unique(dat$dose_unit)[[1]] # just in case - to be generalised
+    if ('dose_unit' %in% experiment_vars) {
+      newrow$dose_unit <- unique(dat$dose_unit)[[1]] # just in case - to be generalised
+    }
     newrow$event <- 0
     newrow$time_to_event <- maxtime
     newrow <- newrow[rep(1,surv_dat$censored[r]),]
@@ -614,7 +686,7 @@ implicit_censoring <- function(dat, explanatory_vars, rep_size) {
 basic_PH_test <- function(dat, cph, explanatory_vars) {
   if (missing(cph)) cph <- FALSE
   if (cph) {
-    cat('---\n', "Quick'n'dirty evaluation of Proportional Hazards in the data...\n", sep='')
+    cat('\n---\n', "Quick'n'dirty evaluation of Proportional Hazards in the data...\n", sep='')
     experiment_vars <- intersect(names(dat), explanatory_vars)
     experiment_vars <- experiment_vars[!experiment_vars=='replicate']
     fm <- formula(paste0('Surv(time_to_event, event) ~ ',
@@ -622,19 +694,19 @@ basic_PH_test <- function(dat, cph, explanatory_vars) {
     cph_model <- coxph(fm, data=dat)
     zphfit <- cox.zph(cph_model)
     if (zphfit$table[,3]['GLOBAL']>0.05){
-      cat('\tSchoenfeld test shows PH assumption is respected\n')
-      cat('\t(null hypothesis=it is not)):\n')
+      cat('\n\tSchoenfeld test shows PH assumption is respected\n')
+      cat('\n\t(null hypothesis=it is not)):\n')
       ggcoxzph(zphfit)
-      cat('\tP-value: ', cox.zph(cph_model)$table[,3], '\n')
+      cat('\n\tP-value: ', cox.zph(cph_model)$table[,3], '\n')
       cat(paste("\n\tlog-rank test p-value:", summary(cph_model)$logtest[3], "\n"))
-      cat('\tThe variables with significant effect are:\n')
+      cat('\n\tThe variables with significant effect are:\n')
       print(cph_model)
     } else {
-      cat('\tSchoenfeld test shows PH assumption is NOT respected:\n\n')
+      cat('\n\tSchoenfeld test shows PH assumption is NOT respected:\n\n')
       print(cox.zph(cph_model)$table[,3]['GLOBAL'])
     }
   } else {
-    cat('---\n', "Evaluation of Proportional Hazards has not been requested.\n", sep='')
+    cat('\n---\n', "Evaluation of Proportional Hazards has not been requested.\n", sep='')
   }
 }
 
@@ -654,8 +726,8 @@ analyse_spreadsheet <- function(
   # RECONCILE ARGUMENTS, METADATA, DATA COLUMN NAMES
   # determine the size of the strata replicates &
   # harmonise column names and very basic data cleanup (NAs...)
-  explanatory_vars <- c('genotype', 'treatment', 'sex', 'replicate', 'dose')
-  all_vars <- c('genotype', 'treatment', 'sex', 'replicate', 'dose',
+  explanatory_vars <- c('genotype', 'treatment_1', 'treatment_2', 'sex', 'replicate', 'dose')
+  all_vars <- c('genotype', 'treatment_1', 'treatment_2', 'sex', 'replicate', 'dose',
                 'events', 'censored', 'dose_unit',
                 'date', 'time')
   rep_size  <- set_rep_size(dat, metadata, rep_size, explanatory_vars)
