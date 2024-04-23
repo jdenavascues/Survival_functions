@@ -562,6 +562,7 @@ find_time_intervals <- function(dat, explanatory_vars, rec_style, time_unit) {
   # turn cumulative events into new ones-only
   cat('\nEstablishing individual events (non-cumulative)...\n')
   included_vars <- intersect(names(dat), explanatory_vars)
+  # this part is very slow -- try to use vectorized functions
   if  (rec_style == 'cumulative') {
     var_combos <- unique(expand_grid(dat[included_vars]))
     for (row in 1:nrow(var_combos)) {
@@ -601,12 +602,12 @@ rowtime_to_rowevent <- function(dat, explanatory_vars) {
     names(censor_dat)[names(censor_dat)=='censored'] <- 'events'
   }
   # new col with _type_ (not number) of event
-  events_dat$event <- 1 # code for event=death
-  censor_dat$event <- 0 # code for event=censoring
+  events_dat$event_type <- 1 # code for event=death
+  censor_dat$event_type <- 0 # code for event=censoring
   
   # combine deaths and censorings, remove unwanted cols
-  dat <- rbind(events_dat, censor_dat)
-  keeper_cols <- c(experiment_vars, "time_to_event", "event")
+  dat <- rbind(events_dat, censor_dat) # using 'events' as binder
+  keeper_cols <- c(experiment_vars, "time_to_event", "event_type")
   dat <- select(dat, all_of( intersect(keeper_cols, names(dat)) ))
   
   # make sure strata with no events recorded are not lost
@@ -620,7 +621,7 @@ rowtime_to_rowevent <- function(dat, explanatory_vars) {
     if ('dose_unit' %in% experiment_vars) {
       newrow$dose_unit <- unique(dat$dose_unit)[[1]] # just in case - to be generalised
     }
-    newrow$event <- 0
+    newrow$event_type <- 0
     newrow$time_to_event <- max(dat$time_to_event)
     dat <- rbind(dat, newrow)
   }
@@ -638,8 +639,8 @@ implicit_censoring <- function(dat, explanatory_vars, rep_size) {
   
   # find out total numbers of 'accounted for' individuals
   experiment_vars <- intersect(names(dat), explanatory_vars)
-  surv_dat <- aggregate(event ~ ., # period indicates ALL variables
-                        dat[,c(experiment_vars, 'event')],
+  surv_dat <- aggregate(event_type ~ ., # period indicates ALL variables
+                        dat[,c(experiment_vars, 'event_type')],
                         sum)
   
   # calculate remainder of individuals in each replicate per stratum
@@ -649,9 +650,7 @@ implicit_censoring <- function(dat, explanatory_vars, rep_size) {
       stop(
         cat('\nThe table reporting replicate sizes in the excel file ',
             'does not have the appropriate number of rows.\n', sep='')
-      )
-      }
-    )
+    )})
     # find common colnames for surv_dat and rep_size
     rep_cols <- intersect(names(surv_dat), names(rep_size))
     # find the order of rep_size rows to match the variables order of surv_dat
@@ -673,7 +672,7 @@ implicit_censoring <- function(dat, explanatory_vars, rep_size) {
     if ('dose_unit' %in% experiment_vars) {
       newrow$dose_unit <- unique(dat$dose_unit)[[1]] # just in case - to be generalised
     }
-    newrow$event <- 0
+    newrow$event_type <- 0
     newrow$time_to_event <- maxtime
     newrow <- newrow[rep(1,surv_dat$censored[r]),]
     dat <- rbind(dat, newrow)
@@ -689,7 +688,7 @@ basic_PH_test <- function(dat, cph, explanatory_vars) {
     cat('\n---\n', "Quick'n'dirty evaluation of Proportional Hazards in the data...\n", sep='')
     experiment_vars <- intersect(names(dat), explanatory_vars)
     experiment_vars <- experiment_vars[!experiment_vars=='replicate']
-    fm <- formula(paste0('Surv(time_to_event, event) ~ ',
+    fm <- formula(paste0('Surv(time_to_event, event_type) ~ ',
                          paste(experiment_vars, collapse=' + ')))
     cph_model <- coxph(fm, data=dat)
     zphfit <- cox.zph(cph_model)
