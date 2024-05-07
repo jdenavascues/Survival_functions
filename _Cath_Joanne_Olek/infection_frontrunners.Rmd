@@ -1,0 +1,279 @@
+---
+title: "DAXX, SCFAs and innate immunity in _Drosophila_"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    toc_depth: 3
+    highlight: haddock
+---
+
+## Computing tools
+
+### Libraries
+```{r, message = FALSE, warning = FALSE}
+# data handling
+library(readxl)
+library(tidyverse)
+library(magrittr)
+# stats
+library(survival)
+library(survminer)
+# for aesthetics/plotting
+library(ggthemes) # italics in the figures
+library(ggtext) # italics in the figures
+require(knitr)
+require(kableExtra)
+```
+
+### Custom function `analyse_spreadsheet`
+```{r, message = FALSE, warning = FALSE}
+devtools::source_url('https://raw.githubusercontent.com/jdenavascues/Survival_functions/main/infection.R')
+```
+
+# Experiment parameters
+
+* Start date: 04/03/2024
+* Lab members: `Oleksander, Catherine and Joanne` (Frontrunners 2023/24)
+* Genotypes:
+    * _daxx^NP4778^_
+    * _Dahomey wild types_
+* Pathogen: e.g. _S. marcescens_ Db11 (OD~600~=100)
+* Infection method: oral
+
+# Preparing the data
+
+## Loading the data
+
+Quick look at the data:
+```{r,  echo = FALSE, message = FALSE, warning = FALSE}
+filepath <- file.path('/Users/JQ/Documents/__RESEARCH/__PROJECTS/_SMARCAD+CrA/Infection/_Cath_Joanne_Olek',
+                      'survival data collection template .xlsx')
+data <- read_xlsx(filepath, skip = 1)
+# Remove unnecessary rows and columns
+data <- data[-c(1,2), ]
+head(data)
+```
+
+We need to read the timepoints, putting together the date from one row with the time from the other.
+Thenan rename columns:
+```{r}
+# read time point info from excel file
+data2 <- read_xlsx(filepath,
+                   range='G3:V4',
+                   col_names=paste0('t',as.character(1:16)),
+                   col_types=rep('date',16)) %>%
+  tibble::rownames_to_column() %>%  
+  pivot_longer(-rowname) %>% 
+  pivot_wider(names_from=rowname, values_from=value) %>%
+  mutate(datetime = str_c(as.Date(`1`), strftime(`2`, format="%H:%M:%S"), sep=' '))
+# rename columns to make them more descriptive
+colnames(data) <- c("Genotype", "Treatment_1", "Sex", "Treatment_2", "Replicate", data2$datetime)
+data %<>% mutate(across(6:length(colnames(data)), ~ as.integer(.x)))
+head(data)
+```
+
+## A bit of data wrangling
+
+Now we need this in long form:
+```{r}
+data %<>%
+  pivot_longer(cols = 6:21, names_to = "datetime", values_to = "deaths") %>%
+  mutate(date = as.Date(datetime)) %>%
+  mutate(time = strftime(datetime, format="%H:%M:%S")) %>%
+  select(!datetime)
+head(data)
+```
+
+In principle, this should be enough to start applying the `analyse_spreadsheet` function from my repository.
+However, this has two limitations:
+
+* it is designed for ONE treatment, not two at the same time
+* it is designed for the same `rep_size` for all samples and replicates
+
+Quick look at the replicate sizes:
+```{r}
+rep_size <- read_xlsx(filepath, sheet='rep_size')
+colnames(rep_size) <- c('genotype', 'treatment_1', 'sex', 'treatment_2', 'replicate', 'size')
+head(rep_size)
+```
+
+Now we can provide the wrapper function with all we need for a quick prelim work
+```{r}
+data <- analyse_spreadsheet(data, rep_size=rep_size, cph=TRUE)
+```
+
+Now we have a data.frame with all the original data but also:
+- all data checked for integrity and internal consistency
+- 'repaired' data from lost corpses eaten up by larvae
+- additional censoring of all surviving flies
+- format compatible with `Survival` package
+- and a quick preliminary view that Cox proportional hazards are not respected
+```{r}
+tb <- knitr::kable(data, format = "html")
+kableExtra::kable_styling(tb, "striped", position = "left", font_size = 10,
+              html_font = '"Arial", arial, helvetica, sans-serif')
+```
+
+# Hypothesis testing
+
+First let us explore different hypotheses:
+- Are _Pseudomonas entomophila_ really killing flies?
+- If _P.ent._ are pathogenic,
+  - are _Drosophila_ males and females different in their susceptibility?
+  - are _daxx^NP4778^_ mutants more susceptible than _Dahomey_ wild-types?
+  - does raising the larvae in crotonic acid affect the adult immuno-competence?
+- Do any of the previous variables interact, i.e. susceptibility only changes in certain combinations of the variables?
+
+We can do this using `survival` and `survminer` packages:
+```{r}
+# from `survival`:
+pathogenicity <- surv_fit( Surv(time_to_event, event_type) ~ treatment_2, data = data) # do Pseudomonas kill flies?
+# from `survminer`:
+surv_pvalue(pathogenicity, method = "S1",
+            test.for.trend = FALSE, combine = FALSE)[1:3]
+```
+So, bacteria do kill flies. Not with spectacular confidence, but they do. (Maybe they will if we focus on specific groups).
+
+So, does sex impact survival?
+```{r}
+sexspec <- surv_fit( Surv(time_to_event, event_type) ~ sex,
+                     data = data) # does sex affect survival?
+# from `survminer`:
+surv_pvalue(sexspec, method = "1",
+            test.for.trend = FALSE, combine = FALSE)[1:3]
+ggsurvplot(sexspec)
+```
+It does. But, does it affect immunocompetence, or just `survival`? It seems to be a much stronger variable than infection itself! We cannot test formally for variable interactions, but we can try to see "qualitative" interactions: do effects go away if we consider only a subset of the data? So, does sex matter for the infected flies?
+```{r}
+sexspec_inf <- surv_fit( Surv(time_to_event, event_type) ~ sex,
+                     data = filter(data, treatment_2=='P.ent.')) # does sex affect survival?
+surv_pvalue(sexspec_inf, method = "1",
+            test.for.trend = FALSE, combine = FALSE)[1:3]
+ggsurvplot(sexspec_inf)
+```
+Ok, it does - but is it the same for non-infected flies?
+```{r}
+sexspec_mock <- surv_fit( Surv(time_to_event, event_type) ~ sex,
+                     data = filter(data, treatment_2=='vehicle')) # does sex affect survival?
+surv_pvalue(sexspec_mock, method = "1",
+            test.for.trend = FALSE, combine = FALSE)[1:3]
+ggsurvplot(sexspec_mock)
+```
+Even more so!!! Maybe this has to do with the genotype?
+Then we should probably explore this more systematically:
+```{r}
+# also from survminer
+res <- pairwise_survdiff(Surv(time_to_event, event_type) ~ 
+                           sex + genotype + treatment_2,
+                         data = data)
+# capture as dataframe
+dt <- as.data.frame(round(res$p.value,3))
+names(dt) <- str_remove_all(names(dt), "sex=|genotype=|treatment_2=")
+rownames(dt) <- str_remove_all(rownames(dt), "sex=|genotype=|treatment_2=")
+dt %>%
+#  mutate(across(everything(), ~replace_na(., 1))) %>%
+  mutate(across(everything(),
+                ~ case_when(. >= 0.05 ~ cell_spec(., color = "#777777"),
+                            (. < 0.05 & 0.01 <= .) ~ cell_spec(., background = "#ffaacc"),
+                            (. < 0.01 & 0.001 <= .) ~ cell_spec(., background = "#ee7799"),
+                            . < 0.001 ~ cell_spec(., background = "#ee5577")))) %>%
+  kbl(booktabs = TRUE,
+      linesep = "",
+      escape = FALSE) %>%
+  kable_minimal(full_width = FALSE)
+```
+
+
+# Plotting
+
+```{r,  echo = FALSE, message = FALSE, warning = FALSE}
+# palette <- c('#85C1E9', '#999999', '#E74C3C', #'#F1C40F'
+#              '#4444DD', '#000000', '#A2103C') # '#F39C12'
+#line_type <- c(rep("solid",3),rep("twodash",3))
+title <- 'Susceptibility to *S. marcescens*'
+model <- surv_fit(Surv(time_to_event, event_type) ~ genotype + treatment_2,
+                  data = filter(data, sex=='F'))
+g <- ggsurvplot(model,
+                pval = TRUE,                       # adds pval
+                conf.int = TRUE,                   # adds 95% confidence interval
+                conf.int.alpha = 0.1,              # makes it more transparent
+                surv.median.line = "v",           # adds median points
+                #palette = palette,
+                xlab = "Time (hours)",              # remove x axis label
+                ylab = "Survival Probability",     # y axis label
+                #linetype = line_type,
+                title = title,
+                font.legend = c(7),               # legend size
+                legend = "bottom")                  # legend position
+g
+```
+
+#### To prepare the legend:
+
+Let's have a look at our strata (by default organised as `genotype:treatment` in alphabetical order): 
+```{r,  echo = FALSE, message = FALSE, warning = FALSE}
+levels(g$data.survtable$strata)
+```
+But I'd like to present the strata as here:
+```{r,  echo = FALSE, message = FALSE, warning = FALSE}
+exgrid <- expand.grid(unique(sort(data$genotype, decreasing = TRUE)),
+                      unique(sort(data$treatment, decreasing = TRUE)))
+exgrid <- exgrid[order(exgrid$Var2),]
+lab_strata <- paste(exgrid$Var1, exgrid$Var2, sep=" | ")
+lab_strata
+```
+```{r}
+lab_strata <- c("*myoIA>ctrl^KD^* | Sucrose",
+                "*myoIA>Etl1^KD^* | Sucrose",
+                "*ken^1^* | Sucrose",
+                "*myoIA>ctrl^KD^* | S.marcescens",
+                "*myoIA>Etl1^KD^* | S.marcescens",
+                "*ken^1^* | S.marcescens")
+lab_strata
+```
+to match the colours and the line types like this:
+
+```{r,  echo = FALSE, message = FALSE, warning = FALSE, fig.height = 1, fig.width=2.5}
+x <- rep(c(1:20), 6)
+variable <- unlist(lapply(lab_strata, rep, 20))
+value <- c( 5+rnorm(20)/5, 4+rnorm(20)/5, 3+rnorm(20)/5,
+            2+rnorm(20)/5, 1+rnorm(20)/5, rnorm(20)/5 )
+df <- data.frame(x, variable, value)
+d <- ggplot(df, aes(x=x, y=value, group=variable, colour=variable )) +
+  geom_line(aes(linetype=variable, colour=variable)) +
+  scale_linetype_manual(breaks=lab_strata, values=line_type, labels=LETTERS[1:6]) +
+  scale_colour_manual(breaks=lab_strata, values=palette, labels=LETTERS[1:6]) +
+  theme(legend.text=element_text(size=5),
+        legend.title = element_text(size=6),
+        legend.key.height = unit(1/6, 'in'))
+d
+```
+
+To match what we want, the order of the legends, colours and line types should be like:
+```{r,  echo = FALSE, message = FALSE, warning = FALSE}
+lab_strata[c(1,3,2,4,6,5)]
+```
+And the reverse order would be:
+```{r,  echo = FALSE, message = FALSE, warning = FALSE}
+l <- levels(g$data.survtable$strata)[c(6,2,4,5,1,3)]
+l
+```
+Now we can start with the preliminary plot:
+
+```{r,  echo = FALSE, message = FALSE, warning = FALSE, fig.height = 3, fig.width=5}
+g$plot +
+  scale_colour_manual(name='', breaks=l, values=palette,
+                      labels=lab_strata[c(1,3,2,4,6,5)],
+                      guide=guide_legend(nrow = 3)) +
+  scale_fill_manual(name='', breaks=l, values=palette,
+                    labels=lab_strata[c(1,3,2,4,6,5)],
+                    guide=guide_legend(nrow = 3)) +
+  scale_linetype_manual(name='', breaks=l, values=line_type,
+                        labels=lab_strata[c(1,3,2,4,6,5)],
+                        guide=guide_legend(nrow = 3)) +
+  theme(legend.text=element_markdown(),
+        plot.title = element_markdown())
+```
+
+It seems that the only susceptible flies are the _ken^1^_
