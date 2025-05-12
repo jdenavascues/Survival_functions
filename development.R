@@ -58,9 +58,9 @@ load_devtime_data <- function(x, sheet, rep_size, cum, censor=FALSE) {
           }
         }
       # check that the Excel file has a 'metadata' sheet (ignoring capitalisation)
-      if (!is.na(match("metadata", str_to_lower( (excel_sheets(filepath)) )))) {
-        m <- match("metadata", str_to_lower(excel_sheets(filepath)))
-        metadata <- read_excel(x, sheet=excel_sheets(filepath)[m])
+      if (!is.na(match("metadata", str_to_lower( (excel_sheets(x)) )))) {
+        m <- match("metadata", str_to_lower(excel_sheets(x)))
+        metadata <- read_excel(x, sheet=excel_sheets(x)[m])
       }
     }
     # if it is not a path, then check if it is a dataframe
