@@ -43,7 +43,7 @@ load_devtime_data <- function(x, sheet, rep_size, cum, censor=FALSE) {
   # check input is a character
   if (is.character(x)) {
     # check input is a path to an Excel file
-    if (file.exists(x) & startsWith(format_from_signature(filepath),'xl')){
+    if (file.exists(x) & startsWith(format_from_signature(x),'xl')){
       # check `sheet` is specified
       if (!missing(sheet)){
         df <- read_excel(x, sheet=sheet)
