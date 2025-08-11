@@ -139,7 +139,7 @@ load_devtime_data <- function(x, sheet, rep_size, cum, censor=FALSE) {
   format_in <- "%d.%m.%Y"
   df <- df %>%
     mutate(date = as.Date(df$date, format=format_in),
-           time2 = dmy_hms(str_c(data_ka$date, data_ka$time, sep=' '))) %>%
+           datetime = dmy_hms(str_c(data_ka$date, data_ka$time, sep=' '))) %>%
     # this calculates the time from the first "observation" that initalises
     # manually the pupariation event recording by having each stratum
     # starting with a 'zero' events observation time corresponding to
@@ -150,8 +150,8 @@ load_devtime_data <- function(x, sheet, rep_size, cum, censor=FALSE) {
     #    - allowing for storing the latest point at which there are no events observed
     #      (for smoothing the curves)
     # this assumes the df contains one experimental batch => only 1 initial times
-    arrange(date, time) %>%
-    mutate(hour = signif(difftime(time2, time2[1], units = "hours"), 3))
+    arrange(datetime) %>%
+    mutate(hour = signif(difftime(datetime, datetime[1], units = "hours"), 3))
 
   # IN CASE DATA IS RECORDED CUMULATIVELY
   
