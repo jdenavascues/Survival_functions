@@ -138,8 +138,8 @@ load_devtime_data <- function(x, sheet, rep_size, cum, censor=FALSE) {
   
   cat('establishing time intervals...\n')
   df <- df %>%
-    mutate(date = format(date, "%d.%m.%Y"),
-           datetime = dmy_hms(str_c(df$date, df$time, sep=' '))) %>%
+    mutate(datetime = dmy_hms(str_c(format(date, "%d.%m.%Y"),
+                                    time, sep=' '))) %>%
     # this calculates the time from the first "observation" that initalises
     # manually the pupariation event recording by having each stratum
     # starting with a 'zero' events observation time corresponding to
