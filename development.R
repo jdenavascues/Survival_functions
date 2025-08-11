@@ -4,6 +4,7 @@ library(survminer)
 library(dplyr)
 library(tidyr)
 library(stringr)
+library(lubridate)
 
 f <- function(x, y) {
   # this is just to change the format of the date.
@@ -136,11 +137,22 @@ load_devtime_data <- function(x, sheet, rep_size, cum, censor=FALSE) {
   
   cat('establishing time intervals...\n')
   format_in <- "%d.%m.%Y"
-  df$date <- as.Date(df$date, format=format_in)
-  df$time2 <- apply(df[,c('date', 'time')], 1, function(w) f(w['date'], w['time']))
-  df$time2 <- as.POSIXct(df$time2)
-  df$hour <- signif(difftime(df$time2, df$time2[1], units = "hours"), 3)
-  
+  df <- df %>%
+    mutate(date = as.Date(df$date, format=format_in),
+           time2 = dmy_hms(str_c(data_ka$date, data_ka$time, sep=' '))) %>%
+    # this calculates the time from the first "observation" that initalises
+    # manually the pupariation event recording by having each stratum
+    # starting with a 'zero' events observation time corresponding to
+    # the median egg laying time.
+    # this should change to:
+    #    - sorting the columns by group at this time
+    #    - obtaining this info from the metadata
+    #    - allowing for storing the latest point at which there are no events observed
+    #      (for smoothing the curves)
+    # this assumes the df contains one experimental batch => only 1 initial times
+    arrange(date, time) %>%
+    mutate(hour = signif(difftime(time2, time2[1], units = "hours"), 3))
+
   # IN CASE DATA IS RECORDED CUMULATIVELY
   
   cat('establishing individual events (non-cumulative)...\n')
