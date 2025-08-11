@@ -109,6 +109,7 @@ load_devtime_data <- function(x, sheet, rep_size, cum, censor=FALSE) {
   # make lowercase
   names(df) <- str_to_lower(names(df))
   names(df)[names(df)=='dose_units'] <- 'dose_unit'
+  names(df)[names(df)=='events'] <- 'event'
   # make sure the 'dose' column is named correctly
   if (length( grep('dose', names(df)) )>0) {
     for (j in grep('dose', names(df)) ) {
@@ -136,9 +137,8 @@ load_devtime_data <- function(x, sheet, rep_size, cum, censor=FALSE) {
   # ESTABLISH TIME INTERVALS
   
   cat('establishing time intervals...\n')
-  format_in <- "%d.%m.%Y"
   df <- df %>%
-    mutate(date = as.Date(df$date, format=format_in),
+    mutate(date = format(date, "%d.%m.%Y"),
            datetime = dmy_hms(str_c(df$date, df$time, sep=' '))) %>%
     # this calculates the time from the first "observation" that initalises
     # manually the pupariation event recording by having each stratum
