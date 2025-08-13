@@ -1,10 +1,13 @@
 library(readxl)
-library(survival)
-library(survminer)
 library(dplyr)
 library(tidyr)
 library(stringr)
+
 library(lubridate)
+library(hms)
+
+library(survival)
+library(survminer)
 
 f <- function(x, y) {
   # this is just to change the format of the date.
@@ -74,6 +77,9 @@ load_devtime_data <- function(x, sheet, rep_size, cum, censor=FALSE) {
   
   # RECONCILE ARGUMENTS AND METADATA
   
+  # Future work:
+  #    - obtain egg collection datetime from the metadata (per stratum/batch)
+
   # `rep_size`
   if (missing(rep_size)) {
     if (exists('metadata')) {
@@ -99,11 +105,12 @@ load_devtime_data <- function(x, sheet, rep_size, cum, censor=FALSE) {
     } else {
       cat('There is no input information about whether the data is recorded cumulatively.\n')
       cat('`analyse_spreadsheet` will attempt to deduce the value.')
-      cum = check_cumulative(df, rep_size)
+      cum <- check_cumulative(df, rep_size)
     }
   }
   
   # STANDARDISE COLUMN NAMES
+  
   # pending: catch naming/missing data errors here <----------------------------
   
   # make lowercase
@@ -128,7 +135,7 @@ load_devtime_data <- function(x, sheet, rep_size, cum, censor=FALSE) {
     df$dose <- 'nd'
   }
   # make sure the 'censored' column is named correctly
-  if (length( grep('censor', names(df)) )==1){
+  if (length( g,rep('censor', names(df)) )==1){
     names(df)[grep('censor', names(df))] <- 'censored'
   } else if (length( grep('censor', names(df)) )==0) {
     df$censored <- 0
@@ -137,21 +144,53 @@ load_devtime_data <- function(x, sheet, rep_size, cum, censor=FALSE) {
   # ESTABLISH TIME INTERVALS
   
   cat('establishing time intervals...\n')
+  
+  # harmonise date/time formats
+  ## date
+  if ( is.character(df$date) ) {
+    t <- try( df$date <- as.Date(df$date) )
+    if (inherits(t, "try-error")) {
+      tt <- try( df$date <- dmy(df$date) )
+      message('`read_excel` did not recognise the "date" column as a date
+             and `as.Date` could not guess the format.
+             `load_devtime_data` assumes it is in dmy format.')
+      if (inherits(tt, "try-error")) {
+        message('`read_excel` did not recognise the "date" column as a date
+                and neither `as.Date` nor `lubridate::dmy` could transform
+                it into <dttm> format. Modify the original dataset.')
+      }
+    }
+  } else if (!(is.Date(df$date) | is.POSIXt(df$date)) ) {
+    stop('The "date" column is not in an accepted format for `load_devtime_data`.
+         Convert it to character, Date or POSIXt')
+  }
+  ## time
+  if ( is.character(df$time) ) {
+    # case hh.mm.ss... (where . is not alphanumeric, >=2 digits for seconds)
+    if ( all(str_detect(df$time, '^\\d{2}[^[:alnum:]]\\d{2}[^[:alnum:]]\\d+$')) ) {
+      df$time <- hms( lubridate::hms(df$time) ) # class "hms" "difftime"
+    }
+    # case hh:mm (where . is not alphanumeric, 2 digits per unit)
+    else if ( all(str_detect(df$time, '^\\d{2}[^[:alnum:]]\\d$')) ) {
+      df$time <- hms( hm(df$time) ) # class "hms" "difftime"
+    }
+  } else if (is.POSIXt(df$time) | is.difftime(df$time) ) {
+    df$datetime <- as.POSIXct(paste0( date(df$date),
+                                      trunc_hms(as_hms(df$time), 60) ))
+  } else {
+    stop('The "time" column is not in an accepted format for `load_devtime_data`.
+         Convert it to character (e.g. "hh:mm:ss"), Date or POSIXt')
+  }
+  
+  # calculate the time difference between first observation (egg collection)
   df <- df %>%
-    mutate(datetime = dmy_hms(str_c(format(date, "%d.%m.%Y"),
-                                    time, sep=' '))) %>%
-    # this calculates the time from the first "observation" that initalises
-    # manually the pupariation event recording by having each stratum
-    # starting with a 'zero' events observation time corresponding to
-    # the median egg laying time.
-    # this should change to:
-    #    - sorting the columns by group at this time
-    #    - obtaining this info from the metadata
-    #    - allowing for storing the latest point at which there are no events observed
-    #      (for smoothing the curves)
-    # this assumes the df contains one experimental batch => only 1 initial times
     arrange(datetime) %>%
     mutate(hour = signif(difftime(datetime, datetime[1], units = "hours"), 3))
+    # This assumes the dataset has been manually initialised with a
+    # zero-event observation at the time of the egg collection.
+    # This should improve by:
+    #    - obtaining this info from the metadata (per stratum/batch)
+    #    - storing/deducing latest point with no events (for smoothing the curves)
 
   # IN CASE DATA IS RECORDED CUMULATIVELY
   
