@@ -135,7 +135,7 @@ load_devtime_data <- function(x, sheet, rep_size, cum, censor=FALSE) {
     df$dose <- 'nd'
   }
   # make sure the 'censored' column is named correctly
-  if (length( g,rep('censor', names(df)) )==1){
+  if (length( grep('censor', names(df)) )==1){
     names(df)[grep('censor', names(df))] <- 'censored'
   } else if (length( grep('censor', names(df)) )==0) {
     df$censored <- 0
